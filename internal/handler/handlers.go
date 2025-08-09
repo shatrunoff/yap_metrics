@@ -24,7 +24,7 @@ func handlerUpdate(w http.ResponseWriter, r *http.Request) {
 	// парсинг URL
 	splitURL := strings.Split(r.URL.Path, "/")
 	if len(splitURL) != 5 {
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
