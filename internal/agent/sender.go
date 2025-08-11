@@ -18,29 +18,23 @@ func NewSender(ServerURL string) *Sender {
 	return &Sender{
 		ServerURL: ServerURL,
 		Client: &http.Client{
-			Timeout: time.Duration(NewMetricsCollector().PollCount),
+			Timeout: 4 * time.Second,
 		},
 	}
 }
 
 func (s *Sender) Send(metrics map[string]model.Metrics) error {
-	// формируем URL
 	URL := "http://" + s.ServerURL
-	for _, metric := range metrics {
-		url := fmt.Sprintf(
-			"%s/update/%s/%s/",
-			URL,
-			metric.MType,
-			metric.ID,
-		)
 
+	for _, metric := range metrics {
+		// парсим значение метрики в строку
 		var strValue string
 		switch metric.MType {
 		case model.Gauge:
 			if metric.Value == nil {
 				continue
 			}
-			strValue = strconv.FormatFloat(*metric.Value, 'f', -2, 64)
+			strValue = strconv.FormatFloat(*metric.Value, 'f', -1, 64)
 		case model.Counter:
 			if metric.Delta == nil {
 				continue
@@ -50,16 +44,23 @@ func (s *Sender) Send(metrics map[string]model.Metrics) error {
 			continue
 		}
 
-		url += strValue
+		// полный URL
+		url := fmt.Sprintf(
+			"%s/update/%s/%s/%s",
+			URL,
+			metric.MType,
+			metric.ID,
+			strValue,
+		)
 
-		// запрос
-		request, err := http.NewRequest("POST", url, nil)
+		// POST-запрос
+		request, err := http.NewRequest(http.MethodPost, url, nil)
 		if err != nil {
 			return fmt.Errorf("FAILED to create request: %w", err)
 		}
 		request.Header.Set("Content-Type", "text/plain")
 
-		// ответ
+		// отправляем
 		response, err := s.Client.Do(request)
 		if err != nil {
 			return fmt.Errorf("FAILED to send metric %s: %w", metric.ID, err)

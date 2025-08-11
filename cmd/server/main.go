@@ -8,12 +8,14 @@ import (
 	"syscall"
 
 	"github.com/shatrunoff/yap_metrics/internal/handler"
+	"github.com/shatrunoff/yap_metrics/internal/storage"
 )
 
 func main() {
+	memStorage := storage.NewMemStorage()
 	server := &http.Server{
 		Addr:    ":8080",
-		Handler: handler.NewHandler(),
+		Handler: handler.NewHandler(memStorage),
 	}
 
 	go func() {
