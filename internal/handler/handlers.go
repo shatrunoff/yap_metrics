@@ -65,7 +65,7 @@ func (h *Handler) getMetric(w http.ResponseWriter, r *http.Request) {
 	}
 	switch metric.MType {
 	case model.Gauge:
-		fmt.Fprintf(w, "%f", *metric.Value)
+		fmt.Fprintf(w, "%g", *metric.Value)
 	case model.Counter:
 		fmt.Fprintf(w, "%d", *metric.Delta)
 	}
