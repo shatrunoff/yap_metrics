@@ -15,7 +15,7 @@ import (
 func parseServerFlags() string {
 	var serverAddress string
 
-	flag.StringVar(&serverAddress, "a", "localhost:8080", "Server address localhost:8080")
+	flag.StringVar(&serverAddress, "a", "localhost:8080", "Server address host:port")
 	flag.Parse()
 
 	if flag.NArg() > 0 {
@@ -35,10 +35,10 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("Server started on %s", server.Addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server error: %v", err)
 		}
+		log.Printf("Server started on %s", server.Addr)
 	}()
 
 	stopChan := make(chan os.Signal, 1)
