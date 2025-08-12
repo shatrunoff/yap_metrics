@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"net/http"
 	"os"
@@ -11,10 +12,25 @@ import (
 	"github.com/shatrunoff/yap_metrics/internal/storage"
 )
 
+func parseServerFlags() string {
+	var serverAddress string
+
+	flag.StringVar(&serverAddress, "a", "localhost:8080", "Server address localhost:8080")
+	flag.Parse()
+
+	if flag.NArg() > 0 {
+		log.Fatalf("ERROR: unknown arguments: %v", flag.Args())
+	}
+	return serverAddress
+}
+
 func main() {
+
+	serverAddress := parseServerFlags()
 	memStorage := storage.NewMemStorage()
+
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    serverAddress,
 		Handler: handler.NewHandler(memStorage),
 	}
 
