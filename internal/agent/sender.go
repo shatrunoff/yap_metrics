@@ -2,7 +2,10 @@ package agent
 
 import (
 	"fmt"
+	"log"
 	"net/http"
+	"net/url"
+	"path"
 	"strconv"
 	"time"
 
@@ -23,8 +26,17 @@ func NewSender(ServerURL string) *Sender {
 	}
 }
 
+func newMetricURL(baseURL, metricType, metricID, value string) (string, error) {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("ERROR: invalid base URL %w", err)
+	}
+
+	u.Path = path.Join(u.Path, "update", metricType, metricID, value)
+	return u.String(), nil
+}
+
 func (s *Sender) Send(metrics map[string]model.Metrics) error {
-	URL := "http://" + s.ServerURL
 
 	for _, metric := range metrics {
 		// парсим значение метрики в строку
@@ -45,13 +57,15 @@ func (s *Sender) Send(metrics map[string]model.Metrics) error {
 		}
 
 		// полный URL
-		url := fmt.Sprintf(
-			"%s/update/%s/%s/%s",
-			URL,
+		url, err := newMetricURL(
+			"http://"+s.ServerURL,
 			metric.MType,
 			metric.ID,
 			strValue,
 		)
+		if err != nil {
+			log.Printf("ERROR: failed to create URL %v", err)
+		}
 
 		// POST-запрос
 		request, err := http.NewRequest(http.MethodPost, url, nil)
