@@ -2,6 +2,7 @@ package service
 
 import (
 	"log"
+	"sync"
 	"time"
 
 	"github.com/shatrunoff/yap_metrics/internal/agent"
@@ -13,6 +14,7 @@ type AgentService struct {
 	sender    *agent.Sender
 	config    *config.AgentConfig
 	doneChan  chan struct{}
+	wg        sync.WaitGroup
 }
 
 func NewAgent(cfg *config.AgentConfig) *AgentService {
@@ -59,12 +61,24 @@ func (as *AgentService) startSender() {
 
 func (as *AgentService) Stop() {
 	close(as.doneChan)
+	as.wg.Wait()
 }
 
 func (as *AgentService) Run() {
-	// запуск сбора и отправки
-	go as.startCollector()
-	go as.startSender()
+	// 2 горутины
+	as.wg.Add(2)
+
+	// запуск сбора
+	go func() {
+		defer as.wg.Done()
+		as.startCollector()
+	}()
+
+	// запуск отправки
+	go func() {
+		defer as.wg.Done()
+		as.startSender()
+	}()
 
 	<-as.doneChan
 }
