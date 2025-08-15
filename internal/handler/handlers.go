@@ -5,11 +5,40 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"sync"
 	"text/template"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/shatrunoff/yap_metrics/internal/model"
 )
+
+const htmlPage = `
+	<!DOCTYPE html>
+	<html>
+	<head><title>Metrics</title></head>
+	<body>
+	<h1>Metrics</h1>
+	<ul>
+		{{range $name, $metric := .}}
+			<li>{{$metric.MType}} {{$metric.ID}}:
+				{{if eq $metric.MType "` + model.Gauge + `"}}{{$metric.Value}}{{end}}
+				{{if eq $metric.MType "` + model.Counter + `"}}{{$metric.Delta}}{{end}}
+			</li>
+		{{end}}
+	</ul>
+	</body>
+	</html>`
+
+var (
+	metricsTemplate *template.Template
+	once            sync.Once
+)
+
+func initTemplates() {
+	once.Do(func() {
+		metricsTemplate = template.Must(template.New("metrics").Parse(htmlPage))
+	})
+}
 
 type Storage interface {
 	UpdateGauge(name string, value float64)
@@ -74,27 +103,10 @@ func (h *Handler) getMetric(w http.ResponseWriter, r *http.Request) {
 // хэндлер получения всех метрик
 func (h *Handler) listMetrics(w http.ResponseWriter, r *http.Request) {
 	metrics := h.storage.GetAll()
+	initTemplates()
 
-	htmlPage := `
-	<!DOCTYPE html>
-	<html>
-	<head><title>Metrics</title></head>
-	<body>
-	<h1>Metrics</h1>
-	<ul>
-		{{range $name, $metric := .}}
-			<li>{{$metric.MType}} {{$metric.ID}}:
-				{{if eq $metric.MType "` + model.Gauge + `"}}{{$metric.Value}}{{end}}
-				{{if eq $metric.MType "` + model.Counter + `"}}{{$metric.Delta}}{{end}}
-			</li>
-		{{end}}
-	</ul>
-	</body>
-	</html>`
-
-	templ := template.Must(template.New("metrics").Parse(htmlPage))
 	w.WriteHeader(http.StatusOK)
-	templ.Execute(w, metrics)
+	metricsTemplate.Execute(w, metrics)
 }
 
 // основной хэндлер

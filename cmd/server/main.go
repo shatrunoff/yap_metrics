@@ -35,10 +35,11 @@ func main() {
 	}
 
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("Server started on %s", server.Addr)
+		err := server.ListenAndServe()
+		if err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server error: %v", err)
 		}
-		log.Printf("Server started on %s", server.Addr)
 	}()
 
 	stopChan := make(chan os.Signal, 1)

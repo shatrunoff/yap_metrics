@@ -33,7 +33,7 @@ func parseAgentFlags() *config.AgentConfig {
 }
 
 func main() {
-	// инизиализация конфига и агента
+	// инициализация конфига и агента
 	cfg := parseAgentFlags()
 
 	agent := service.NewAgent(cfg)
