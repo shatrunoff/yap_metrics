@@ -19,8 +19,8 @@ func NewMetricsCollector() *MetricsCollector {
 	}
 }
 
-// обновление gaude
-func (mc *MetricsCollector) updateGaude(name string, value float64) {
+// обновление gauge
+func (mc *MetricsCollector) updateGauge(name string, value float64) {
 
 	mc.runtimeMetrics[name] = model.Metrics{
 		ID:    name,
@@ -53,34 +53,34 @@ func (mc *MetricsCollector) Collect() {
 	// потокобезопасный ++
 	atomic.AddInt64(&mc.PollCount, 1)
 
-	// gaude
-	mc.updateGaude("Alloc", float64(memStats.Alloc))
-	mc.updateGaude("BuckHashSys", float64(memStats.BuckHashSys))
-	mc.updateGaude("Frees", float64(memStats.Frees))
-	mc.updateGaude("GCCPUFraction", float64(memStats.GCCPUFraction))
-	mc.updateGaude("GCSys", float64(memStats.GCSys))
-	mc.updateGaude("HeapAlloc", float64(memStats.HeapAlloc))
-	mc.updateGaude("HeapIdle", float64(memStats.HeapIdle))
-	mc.updateGaude("HeapInuse", float64(memStats.HeapInuse))
-	mc.updateGaude("HeapObjects", float64(memStats.HeapObjects))
-	mc.updateGaude("HeapReleased", float64(memStats.HeapReleased))
-	mc.updateGaude("HeapSys", float64(memStats.HeapSys))
-	mc.updateGaude("LastGC", float64(memStats.LastGC))
-	mc.updateGaude("Lookups", float64(memStats.Lookups))
-	mc.updateGaude("MCacheInuse", float64(memStats.MCacheInuse))
-	mc.updateGaude("MCacheSys", float64(memStats.MCacheSys))
-	mc.updateGaude("MSpanInuse", float64(memStats.MSpanInuse))
-	mc.updateGaude("MSpanSys", float64(memStats.MSpanSys))
-	mc.updateGaude("Mallocs", float64(memStats.Mallocs))
-	mc.updateGaude("NextGC", float64(memStats.NextGC))
-	mc.updateGaude("NumForcedGC", float64(memStats.NumForcedGC))
-	mc.updateGaude("NumGC", float64(memStats.NumGC))
-	mc.updateGaude("OtherSys", float64(memStats.OtherSys))
-	mc.updateGaude("PauseTotalNs", float64(memStats.PauseTotalNs))
-	mc.updateGaude("StackInuse", float64(memStats.StackInuse))
-	mc.updateGaude("StackSys", float64(memStats.StackSys))
-	mc.updateGaude("Sys", float64(memStats.Sys))
-	mc.updateGaude("TotalAlloc", float64(memStats.TotalAlloc))
+	// gauge
+	mc.updateGauge("Alloc", float64(memStats.Alloc))
+	mc.updateGauge("BuckHashSys", float64(memStats.BuckHashSys))
+	mc.updateGauge("Frees", float64(memStats.Frees))
+	mc.updateGauge("GCCPUFraction", float64(memStats.GCCPUFraction))
+	mc.updateGauge("GCSys", float64(memStats.GCSys))
+	mc.updateGauge("HeapAlloc", float64(memStats.HeapAlloc))
+	mc.updateGauge("HeapIdle", float64(memStats.HeapIdle))
+	mc.updateGauge("HeapInuse", float64(memStats.HeapInuse))
+	mc.updateGauge("HeapObjects", float64(memStats.HeapObjects))
+	mc.updateGauge("HeapReleased", float64(memStats.HeapReleased))
+	mc.updateGauge("HeapSys", float64(memStats.HeapSys))
+	mc.updateGauge("LastGC", float64(memStats.LastGC))
+	mc.updateGauge("Lookups", float64(memStats.Lookups))
+	mc.updateGauge("MCacheInuse", float64(memStats.MCacheInuse))
+	mc.updateGauge("MCacheSys", float64(memStats.MCacheSys))
+	mc.updateGauge("MSpanInuse", float64(memStats.MSpanInuse))
+	mc.updateGauge("MSpanSys", float64(memStats.MSpanSys))
+	mc.updateGauge("Mallocs", float64(memStats.Mallocs))
+	mc.updateGauge("NextGC", float64(memStats.NextGC))
+	mc.updateGauge("NumForcedGC", float64(memStats.NumForcedGC))
+	mc.updateGauge("NumGC", float64(memStats.NumGC))
+	mc.updateGauge("OtherSys", float64(memStats.OtherSys))
+	mc.updateGauge("PauseTotalNs", float64(memStats.PauseTotalNs))
+	mc.updateGauge("StackInuse", float64(memStats.StackInuse))
+	mc.updateGauge("StackSys", float64(memStats.StackSys))
+	mc.updateGauge("Sys", float64(memStats.Sys))
+	mc.updateGauge("TotalAlloc", float64(memStats.TotalAlloc))
 
 	// counter
 	mc.updateCounter("PollCount", 1)

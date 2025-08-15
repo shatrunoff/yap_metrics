@@ -36,7 +36,7 @@ func (h *Handler) updateMetric(w http.ResponseWriter, r *http.Request) {
 	case model.Gauge:
 		value, err := strconv.ParseFloat(metricValue, 64)
 		if err != nil {
-			http.Error(w, "ERROR: invalid Gaude metric", http.StatusBadRequest)
+			http.Error(w, "ERROR: invalid Gauge metric", http.StatusBadRequest)
 		}
 		h.storage.UpdateGauge(metricName, value)
 
