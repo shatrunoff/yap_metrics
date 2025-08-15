@@ -2,13 +2,13 @@ package handler
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"sync"
 	"text/template"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/shatrunoff/yap_metrics/internal/middleware"
 	"github.com/shatrunoff/yap_metrics/internal/model"
 )
 
@@ -55,7 +55,7 @@ type Handler struct {
 func (h *Handler) updateMetric(w http.ResponseWriter, r *http.Request) {
 
 	// для отладки
-	log.Printf("Incoming update: %s %s", r.Method, r.URL.Path)
+	// log.Printf("Incoming update: %s %s", r.Method, r.URL.Path)
 
 	metricType := chi.URLParam(r, "type")
 	metricName := chi.URLParam(r, "name")
@@ -113,6 +113,8 @@ func (h *Handler) listMetrics(w http.ResponseWriter, r *http.Request) {
 func NewHandler(storage Storage) http.Handler {
 	handler := &Handler{storage: storage}
 	router := chi.NewRouter()
+
+	router.Use(middleware.LoggingMiddleware)
 
 	router.Post("/update/{type}/{name}/{value}", handler.updateMetric)
 	router.Get("/value/{type}/{name}", handler.getMetric)
