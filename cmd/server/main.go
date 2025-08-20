@@ -8,20 +8,31 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/shatrunoff/yap_metrics/internal/config"
 	"github.com/shatrunoff/yap_metrics/internal/handler"
 	"github.com/shatrunoff/yap_metrics/internal/storage"
 )
 
 func parseServerFlags() string {
-	var serverAddress string
 
-	flag.StringVar(&serverAddress, "a", "localhost:8080", "Server address host:port")
+	// конфиг по умолчанию
+	cfg := config.DefaultAgentConfig()
+
+	// получаем флаги командной строки
+	flag.StringVar(&cfg.ServerURL, "a", cfg.ServerURL, "Server address host:port")
 	flag.Parse()
 
 	if flag.NArg() > 0 {
 		log.Fatalf("ERROR: unknown arguments: %v", flag.Args())
 	}
-	return serverAddress
+
+	// проверяем переменные окружения
+	// ADDRESS
+	if envAddr := os.Getenv("ADDRESS"); envAddr != "" {
+		cfg.ServerURL = envAddr
+	}
+
+	return cfg.ServerURL
 }
 
 func main() {
