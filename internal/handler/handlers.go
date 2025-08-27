@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/shatrunoff/yap_metrics/internal/middleware"
 	"github.com/shatrunoff/yap_metrics/internal/model"
+	"go.uber.org/zap"
 )
 
 const htmlPage = `
@@ -49,6 +50,8 @@ type Storage interface {
 
 type Handler struct {
 	storage Storage
+	logger  *zap.Logger
+	sugar   *zap.SugaredLogger
 }
 
 // хэндлер обновления метрики
@@ -111,7 +114,23 @@ func (h *Handler) listMetrics(w http.ResponseWriter, r *http.Request) {
 
 // основной хэндлер
 func NewHandler(storage Storage) http.Handler {
-	handler := &Handler{storage: storage}
+	// инициализируем логгер
+	err := middleware.InitLogger()
+	if err != nil {
+		panic(err)
+	}
+
+	// получаем логгер
+	logger := middleware.GetLogger()
+	sugar := middleware.GetSugar()
+	defer logger.Sync()
+
+	handler := &Handler{
+		storage: storage,
+		logger:  logger,
+		sugar:   sugar,
+	}
+
 	router := chi.NewRouter()
 
 	router.Use(middleware.LoggingMiddleware)
