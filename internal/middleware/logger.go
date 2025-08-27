@@ -31,6 +31,7 @@ func GetSugar() *zap.SugaredLogger {
 type responseWriter struct {
 	http.ResponseWriter
 	status      int
+	size        int
 	wroteHeader bool
 }
 
@@ -47,7 +48,9 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 	if !rw.wroteHeader {
 		rw.WriteHeader(http.StatusOK)
 	}
-	return rw.ResponseWriter.Write(b)
+	size, err := rw.ResponseWriter.Write(b)
+	rw.size += size
+	return size, err
 }
 
 func LoggingMiddleware(h http.Handler) http.Handler {
@@ -74,14 +77,15 @@ func LoggingMiddleware(h http.Handler) http.Handler {
 
 		duration := time.Since(start)
 
-		logData := []interface{}{
-			"Method", r.Method,
+		logData := []any{
 			"URI", r.RequestURI,
-			"Status", rw.status,
+			"Method", r.Method,
 			"Duration", duration.String(),
-			"Duration_ms", duration.Milliseconds(),
+
+			"Status", rw.status,
+			"Size", rw.size,
 		}
 
-		Sugar.Infow("Request processed", logData...)
+		Sugar.Infow("Request completed", logData...)
 	})
 }
