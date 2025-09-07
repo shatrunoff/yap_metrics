@@ -195,12 +195,11 @@ func NewHandler(storage Storage) http.Handler {
 	router := chi.NewRouter()
 	router.Use(middleware.LoggingMiddleware)
 
-	// для update
 	router.Post("/update/{type}/{name}/{value}", handler.updateMetric)
-	router.Post("/update", handler.updateMetric)
-
 	router.Get("/value/{type}/{name}", handler.getMetric)
 	router.Get("/", handler.listMetrics)
+
+	router.Post("/update", handler.updateMetricJSON)
 
 	return router
 
