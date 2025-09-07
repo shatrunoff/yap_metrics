@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -60,6 +61,13 @@ func (h *Handler) updateMetric(w http.ResponseWriter, r *http.Request) {
 	// для отладки
 	// log.Printf("Incoming update: %s %s", r.Method, r.URL.Path)
 
+	// проверка content-type
+	contentType := r.Header.Get("Content-Type")
+	if contentType == "application/json" {
+		h.updateMetricJSON(w, r)
+		return
+	}
+
 	metricType := chi.URLParam(r, "type")
 	metricName := chi.URLParam(r, "name")
 	metricValue := chi.URLParam(r, "value")
@@ -83,6 +91,59 @@ func (h *Handler) updateMetric(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ERROR: unknow metric type", http.StatusBadRequest)
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
+	var metric model.Metrics
+
+	// заголовок ответа
+	w.Header().Set("Content-Type", "application/json")
+
+	// декодируем JSON
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&metric)
+	if err != nil {
+		h.sugar.Errorw("Failed to decode JSON: ", "error", err)
+		http.Error(w, `{"error": "Invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	// валидация полей
+	if metric.ID == "" || metric.MType == "" {
+		h.sugar.Warnw("Missing required fields in JSON", "metric", metric)
+		http.Error(w, `{"error": "Missing required fields: id or type"}`, http.StatusBadRequest)
+		return
+	}
+
+	// обновляем метрики
+	switch metric.MType {
+	case model.Gauge:
+		if metric.Value == nil {
+			h.sugar.Warnw("Missing value for gauge in JSON", "metric", metric)
+			http.Error(w, `{"error": "Missing value for gauge metric"}`, http.StatusBadRequest)
+			return
+		}
+		h.storage.UpdateGauge(metric.ID, *metric.Value)
+
+	case model.Counter:
+		if metric.Delta == nil {
+			h.sugar.Warnw("Missing value for counter in JSON", "metric", metric)
+			http.Error(w, `{"error": "Missing value for counter metric"}`, http.StatusBadRequest)
+		}
+		h.storage.UpdateCounter(metric.ID, *metric.Delta)
+
+	default:
+		h.sugar.Warnw("Unknown metric type in JSON", "type", metric.MType)
+		http.Error(w, `{"error": "Unknown metric type"}`, http.StatusBadRequest)
+		return
+	}
+
+	// возвращаем обновленную метрику
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(metric); err != nil {
+		h.sugar.Errorw("Failed to encode JSON response", "error", err)
+		http.Error(w, `{"error": "Internal server error"}`, http.StatusInternalServerError)
+	}
 }
 
 // хэндлер получения метрики
@@ -132,10 +193,12 @@ func NewHandler(storage Storage) http.Handler {
 	}
 
 	router := chi.NewRouter()
-
 	router.Use(middleware.LoggingMiddleware)
 
+	// для update
 	router.Post("/update/{type}/{name}/{value}", handler.updateMetric)
+	router.Post("/update", handler.updateMetric)
+
 	router.Get("/value/{type}/{name}", handler.getMetric)
 	router.Get("/", handler.listMetrics)
 
