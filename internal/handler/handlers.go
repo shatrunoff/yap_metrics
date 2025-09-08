@@ -199,7 +199,7 @@ func NewHandler(storage Storage) http.Handler {
 	router.Get("/value/{type}/{name}", handler.getMetric)
 	router.Get("/", handler.listMetrics)
 
-	router.Post("/update", handler.updateMetricJSON)
+	router.Post("/update/", handler.updateMetricJSON)
 
 	return router
 
