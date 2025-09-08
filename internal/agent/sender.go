@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -67,10 +68,13 @@ func (s *Sender) SendJSON(metrics map[string]model.Metrics) error {
 		if err != nil {
 			return fmt.Errorf("FAILED to send metric %s: %w", metric.ID, err)
 		}
-		response.Body.Close()
+		defer response.Body.Close()
+
+		// Читаем тело ответа для диагностики
+		body, _ := io.ReadAll(response.Body)
 
 		if response.StatusCode != http.StatusOK {
-			return fmt.Errorf("FAIL status for %s: %d", metric.ID, response.StatusCode)
+			return fmt.Errorf("FAIL status for %s: %d, body: %s", metric.ID, response.StatusCode, string(body))
 		}
 	}
 	return nil

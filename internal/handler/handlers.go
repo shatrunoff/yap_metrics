@@ -117,8 +117,14 @@ func (h *Handler) listMetrics(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
 	var metric model.Metrics
 
+	if r.Header.Get("Content-Type") != "application/json" {
+		http.Error(w, "ERROR: Content-Type must be application/json", http.StatusBadRequest)
+		return
+	}
+
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&metric); err != nil {
+		h.logger.Error("Failed to decode JSON", zap.Error(err))
 		http.Error(w, "ERROR: invalid JSON", http.StatusBadRequest)
 		return
 	}
@@ -157,15 +163,24 @@ func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(updatedMetric)
+	if err := json.NewEncoder(w).Encode(updatedMetric); err != nil {
+		h.logger.Error("Failed to encode JSON response", zap.Error(err))
+		http.Error(w, "ERROR: failed to encode response", http.StatusInternalServerError)
+	}
 }
 
 // хэндлер получения метрики через JSON
 func (h *Handler) getMetricJSON(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Content-Type") != "application/json" {
+		http.Error(w, "ERROR: Content-Type must be application/json", http.StatusBadRequest)
+		return
+	}
+
 	var metric model.Metrics
 
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&metric); err != nil {
+		h.logger.Error("Failed to decode JSON", zap.Error(err))
 		http.Error(w, "ERROR: invalid JSON", http.StatusBadRequest)
 		return
 	}
@@ -182,7 +197,10 @@ func (h *Handler) getMetricJSON(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(foundMetric)
+	if err := json.NewEncoder(w).Encode(foundMetric); err != nil {
+		h.logger.Error("Failed to encode JSON response", zap.Error(err))
+		http.Error(w, "ERROR: failed to encode response", http.StatusInternalServerError)
+	}
 }
 
 // основной хэндлер
@@ -196,7 +214,6 @@ func NewHandler(storage Storage) http.Handler {
 	// получаем логгер
 	logger := middleware.GetLogger()
 	sugar := middleware.GetSugar()
-	defer logger.Sync()
 
 	handler := &Handler{
 		storage: storage,
