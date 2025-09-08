@@ -6,6 +6,7 @@ type AgentConfig struct {
 	PollInterval   time.Duration
 	ReportInterval time.Duration
 	ServerURL      string
+	UseJSON        bool
 }
 
 func DefaultAgentConfig() *AgentConfig {
@@ -13,5 +14,6 @@ func DefaultAgentConfig() *AgentConfig {
 		PollInterval:   2 * time.Second,
 		ReportInterval: 10 * time.Second,
 		ServerURL:      "localhost:8080",
+		UseJSON:        true,
 	}
 }

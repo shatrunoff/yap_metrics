@@ -20,7 +20,7 @@ type AgentService struct {
 func NewAgent(cfg *config.AgentConfig) *AgentService {
 	return &AgentService{
 		collector: agent.NewMetricsCollector(),
-		sender:    agent.NewSender(cfg.ServerURL),
+		sender:    agent.NewSender(cfg.ServerURL, true),
 		config:    cfg,
 		doneChan:  make(chan struct{}),
 	}
