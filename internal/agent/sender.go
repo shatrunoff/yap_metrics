@@ -72,7 +72,7 @@ func (s *Sender) Send(metrics map[string]model.Metrics) error {
 		if err != nil {
 			return fmt.Errorf("FAILED to create request: %w", err)
 		}
-		request.Header.Set("Content-Type", "text/plain")
+		request.Header.Set("Content-Type", "application/json")
 
 		// отправляем
 		response, err := s.Client.Do(request)
