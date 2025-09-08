@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -34,6 +36,44 @@ func newMetricURL(baseURL, metricType, metricID, value string) (string, error) {
 
 	u.Path = path.Join(u.Path, "update", metricType, metricID, value)
 	return u.String(), nil
+}
+
+// Новый метод для отправки через JSON
+func (s *Sender) SendJSON(metrics map[string]model.Metrics) error {
+	for _, metric := range metrics {
+		// Пропускаем метрики без значений
+		if (metric.MType == model.Gauge && metric.Value == nil) ||
+			(metric.MType == model.Counter && metric.Delta == nil) {
+			continue
+		}
+
+		// Подготавливаем JSON
+		jsonData, err := json.Marshal(metric)
+		if err != nil {
+			log.Printf("ERROR: failed to marshal metric %s: %v", metric.ID, err)
+			continue
+		}
+
+		// Создаем запрос
+		url := "http://" + s.ServerURL + "/update/"
+		request, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(jsonData))
+		if err != nil {
+			return fmt.Errorf("FAILED to create request: %w", err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+
+		// Отправляем
+		response, err := s.Client.Do(request)
+		if err != nil {
+			return fmt.Errorf("FAILED to send metric %s: %w", metric.ID, err)
+		}
+		response.Body.Close()
+
+		if response.StatusCode != http.StatusOK {
+			return fmt.Errorf("FAIL status for %s: %d", metric.ID, response.StatusCode)
+		}
+	}
+	return nil
 }
 
 func (s *Sender) Send(metrics map[string]model.Metrics) error {

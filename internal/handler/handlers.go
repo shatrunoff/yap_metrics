@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -112,6 +113,78 @@ func (h *Handler) listMetrics(w http.ResponseWriter, r *http.Request) {
 	metricsTemplate.Execute(w, metrics)
 }
 
+// хэндлер обновления метрики через JSON
+func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
+	var metric model.Metrics
+
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&metric); err != nil {
+		http.Error(w, "ERROR: invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if metric.ID == "" {
+		http.Error(w, "ERROR: metric ID is required", http.StatusBadRequest)
+		return
+	}
+
+	switch metric.MType {
+	case model.Gauge:
+		if metric.Value == nil {
+			http.Error(w, "ERROR: value is required for gauge", http.StatusBadRequest)
+			return
+		}
+		h.storage.UpdateGauge(metric.ID, *metric.Value)
+
+	case model.Counter:
+		if metric.Delta == nil {
+			http.Error(w, "ERROR: delta is required for counter", http.StatusBadRequest)
+			return
+		}
+		h.storage.UpdateCounter(metric.ID, *metric.Delta)
+
+	default:
+		http.Error(w, "ERROR: unknown metric type", http.StatusBadRequest)
+		return
+	}
+
+	// Возвращаем обновленную метрику
+	updatedMetric, ok := h.storage.GetMetric(metric.MType, metric.ID)
+	if !ok {
+		http.Error(w, "ERROR: failed to get updated metric", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(updatedMetric)
+}
+
+// хэндлер получения метрики через JSON
+func (h *Handler) getMetricJSON(w http.ResponseWriter, r *http.Request) {
+	var metric model.Metrics
+
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&metric); err != nil {
+		http.Error(w, "ERROR: invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if metric.ID == "" || metric.MType == "" {
+		http.Error(w, "ERROR: metric ID and type are required", http.StatusBadRequest)
+		return
+	}
+
+	foundMetric, ok := h.storage.GetMetric(metric.MType, metric.ID)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(foundMetric)
+}
+
 // основной хэндлер
 func NewHandler(storage Storage) http.Handler {
 	// инициализируем логгер
@@ -135,10 +208,14 @@ func NewHandler(storage Storage) http.Handler {
 
 	router.Use(middleware.LoggingMiddleware)
 
+	// Старые эндпоинты
 	router.Post("/update/{type}/{name}/{value}", handler.updateMetric)
 	router.Get("/value/{type}/{name}", handler.getMetric)
 	router.Get("/", handler.listMetrics)
 
-	return router
+	// Новые JSON эндпоинты
+	router.Post("/update/", handler.updateMetricJSON)
+	router.Post("/value/", handler.getMetricJSON)
 
+	return router
 }

@@ -41,7 +41,7 @@ func (as *AgentService) startCollector() {
 	}
 }
 
-// отправка метрик
+// отправка метрик через JSON
 func (as *AgentService) startSender() {
 	ticker := time.NewTicker(as.config.ReportInterval)
 	defer ticker.Stop()
@@ -50,7 +50,7 @@ func (as *AgentService) startSender() {
 		select {
 		case <-ticker.C:
 			metrics := as.collector.GetMetrics()
-			if err := as.sender.Send(metrics); err != nil {
+			if err := as.sender.SendJSON(metrics); err != nil {
 				log.Printf("FAIL to send metrics: %v", err)
 			}
 		case <-as.doneChan:
