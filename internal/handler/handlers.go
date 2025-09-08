@@ -164,6 +164,43 @@ func (h *Handler) getMetric(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// получение метрик через JSON
+func (h *Handler) getMetricJSON(w http.ResponseWriter, r *http.Request) {
+	var requestMetric model.Metrics
+
+	// устанавливаем заголовок Content-Type
+	w.Header().Set("Content-Type", "application/json")
+
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&requestMetric); err != nil {
+		h.sugar.Errorw("Failed to decode JSON", "error", err)
+		http.Error(w, `{"error": "Invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	// валидация обязательных полей
+	if requestMetric.ID == "" || requestMetric.MType == "" {
+		h.sugar.Warnw("Missing required fields", "metric", requestMetric)
+		http.Error(w, `{"error": "Missing required fields: id or type"}`, http.StatusBadRequest)
+		return
+	}
+
+	// получаем метрику из хранилища
+	metric, ok := h.storage.GetMetric(requestMetric.MType, requestMetric.ID)
+	if !ok {
+		h.sugar.Warnw("Metric not found", "type", requestMetric.MType, "name", requestMetric.ID)
+		http.Error(w, `{"error": "Metric not found"}`, http.StatusNotFound)
+		return
+	}
+
+	// возвращаем найденную метрику
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(metric); err != nil {
+		h.sugar.Errorw("Failed to encode response", "error", err)
+		http.Error(w, `{"error": "Internal server error"}`, http.StatusInternalServerError)
+	}
+}
+
 // хэндлер получения всех метрик
 func (h *Handler) listMetrics(w http.ResponseWriter, r *http.Request) {
 	metrics := h.storage.GetAll()
@@ -195,11 +232,14 @@ func NewHandler(storage Storage) http.Handler {
 	router := chi.NewRouter()
 	router.Use(middleware.LoggingMiddleware)
 
+	// старые эндпоинты
 	router.Post("/update/{type}/{name}/{value}", handler.updateMetric)
 	router.Get("/value/{type}/{name}", handler.getMetric)
 	router.Get("/", handler.listMetrics)
 
-	router.Post("/update/", handler.updateMetricJSON)
+	// новые для JSON
+	router.Post("/update", handler.updateMetricJSON)
+	router.Post("/value", handler.getMetricJSON)
 
 	return router
 
