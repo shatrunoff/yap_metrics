@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/shatrunoff/yap_metrics/internal/model"
+	model "github.com/shatrunoff/yap_metrics/internal/model"
 )
 
 type Sender struct {
@@ -40,7 +40,22 @@ func newMetricURL(baseURL, metricType, metricID, value string) (string, error) {
 	return u.String(), nil
 }
 
-// Новый метод для отправки через JSON
+// compressData сжимает данные с помощью gzip
+func compressData(data []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+
+	if _, err := gz.Write(data); err != nil {
+		return nil, err
+	}
+	if err := gz.Close(); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
+// Новый метод для отправки через JSON с поддержкой gzip
 func (s *Sender) SendJSON(metrics map[string]model.Metrics) error {
 	for _, metric := range metrics {
 		// Пропускаем метрики без значений
@@ -57,20 +72,15 @@ func (s *Sender) SendJSON(metrics map[string]model.Metrics) error {
 		}
 
 		// Сжимаем данные
-		var compressedData bytes.Buffer
-		gz := gzip.NewWriter(&compressedData)
-		if _, err := gz.Write(jsonData); err != nil {
-			log.Printf("ERROR: failed to compress data: %v", err)
-			continue
-		}
-		if err := gz.Close(); err != nil {
-			log.Printf("ERROR: failed to close gzip writer: %v", err)
+		compressedData, err := compressData(jsonData)
+		if err != nil {
+			log.Printf("ERROR: failed to compress data for metric %s: %v", metric.ID, err)
 			continue
 		}
 
 		// Создаем запрос
 		url := "http://" + s.ServerURL + "/update/"
-		request, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(jsonData))
+		request, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(compressedData))
 		if err != nil {
 			return fmt.Errorf("FAILED to create request: %w", err)
 		}
@@ -132,6 +142,7 @@ func (s *Sender) Send(metrics map[string]model.Metrics) error {
 			return fmt.Errorf("FAILED to create request: %w", err)
 		}
 		request.Header.Set("Content-Type", "text/plain")
+		request.Header.Set("Accept-Encoding", "gzip")
 
 		// отправляем
 		response, err := s.Client.Do(request)

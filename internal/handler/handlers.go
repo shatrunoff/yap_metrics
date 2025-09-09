@@ -109,6 +109,7 @@ func (h *Handler) listMetrics(w http.ResponseWriter, r *http.Request) {
 	metrics := h.storage.GetAll()
 	initTemplates()
 
+	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusOK)
 	metricsTemplate.Execute(w, metrics)
 }
@@ -223,8 +224,9 @@ func NewHandler(storage Storage) http.Handler {
 
 	router := chi.NewRouter()
 
-	router.Use(middleware.GzipMiddleware)
 	router.Use(middleware.LoggingMiddleware)
+	router.Use(middleware.GzipDecompressionMiddleware)
+	router.Use(middleware.GzipCompressionMiddleware)
 
 	// Старые эндпоинты
 	router.Post("/update/{type}/{name}/{value}", handler.updateMetric)
