@@ -24,32 +24,14 @@ func GzipCompressionMiddleware(h http.Handler) http.Handler {
 			return
 		}
 
-		// Проверяем, нужно ли сжимать этот тип контента
-		contentType := w.Header().Get("Content-Type")
-		if !shouldCompress(contentType) {
-			h.ServeHTTP(w, r)
-			return
-		}
-
-		// Создаем gzip writer
-		gz := gzipWriterPool.Get().(*gzip.Writer)
-		defer gzipWriterPool.Put(gz)
-		defer gz.Reset(io.Discard)
-
-		gzipWriter := &gzipResponseWriter{
+		// Создаем обертку для захвата ответа
+		writer := &gzipResponseWriter{
 			ResponseWriter: w,
-			gzipWriter:     gz,
+			gzipWriter:     nil,
 		}
-		gzipWriter.gzipWriter.Reset(w)
+		defer writer.Close()
 
-		// Устанавливаем заголовки
-		w.Header().Set("Content-Encoding", "gzip")
-		w.Header().Del("Content-Length")
-
-		h.ServeHTTP(gzipWriter, r)
-
-		// Завершаем сжатие
-		gzipWriter.gzipWriter.Close()
+		h.ServeHTTP(writer, r)
 	})
 }
 
@@ -76,7 +58,41 @@ type gzipResponseWriter struct {
 }
 
 func (g *gzipResponseWriter) Write(b []byte) (int, error) {
+	// Проверяем Content-Type
+	contentType := g.Header().Get("Content-Type")
+	if !shouldCompress(contentType) {
+		return g.ResponseWriter.Write(b)
+	}
+
+	// Если gzip writer еще не создан, создаем его
+	if g.gzipWriter == nil {
+		gz := gzipWriterPool.Get().(*gzip.Writer)
+		gz.Reset(g.ResponseWriter)
+		g.gzipWriter = gz
+		g.Header().Set("Content-Encoding", "gzip")
+		g.Header().Del("Content-Length")
+	}
+
 	return g.gzipWriter.Write(b)
+}
+
+func (g *gzipResponseWriter) WriteHeader(statusCode int) {
+	contentType := g.Header().Get("Content-Type")
+	if shouldCompress(contentType) && g.gzipWriter == nil {
+		gz := gzipWriterPool.Get().(*gzip.Writer)
+		gz.Reset(g.ResponseWriter)
+		g.gzipWriter = gz
+		g.Header().Set("Content-Encoding", "gzip")
+		g.Header().Del("Content-Length")
+	}
+	g.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (g *gzipResponseWriter) Close() {
+	if g.gzipWriter != nil {
+		g.gzipWriter.Close()
+		gzipWriterPool.Put(g.gzipWriter)
+	}
 }
 
 func shouldCompress(contentType string) bool {

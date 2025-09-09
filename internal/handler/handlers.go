@@ -224,8 +224,8 @@ func NewHandler(storage Storage) http.Handler {
 
 	router := chi.NewRouter()
 
-	router.Use(middleware.LoggingMiddleware)
 	router.Use(middleware.GzipDecompressionMiddleware)
+	router.Use(middleware.LoggingMiddleware)
 	router.Use(middleware.GzipCompressionMiddleware)
 
 	// Старые эндпоинты
