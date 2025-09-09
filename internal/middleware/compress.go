@@ -88,7 +88,7 @@ func (g *gzipResponseWriter) Write(b []byte) (int, error) {
 func shouldCompress(contentType string) bool {
 	compressibleTypes := []string{
 		"application/json",
-		"text/plain",
+		"text/html",
 	}
 
 	for _, t := range compressibleTypes {
