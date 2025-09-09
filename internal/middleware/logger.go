@@ -67,6 +67,8 @@ func LoggingMiddleware(h http.Handler) http.Handler {
 		Sugar.Infow("Request",
 			zap.String("Method", r.Method),
 			zap.String("URI", r.RequestURI),
+			zap.String("Content-Encoding", r.Header.Get("Content-Encoding")),
+			zap.String("Accept-Encoding", r.Header.Get("Accept-Encoding")),
 		)
 
 		// захват статуса
@@ -84,6 +86,7 @@ func LoggingMiddleware(h http.Handler) http.Handler {
 
 			"Status", rw.status,
 			"Size", rw.size,
+			"Content-Encoding", w.Header().Get("Content-Encoding"),
 		}
 
 		Sugar.Infow("Request completed", logData...)

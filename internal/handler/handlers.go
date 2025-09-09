@@ -223,6 +223,7 @@ func NewHandler(storage Storage) http.Handler {
 
 	router := chi.NewRouter()
 
+	router.Use(middleware.GzipMiddleware)
 	router.Use(middleware.LoggingMiddleware)
 
 	// Старые эндпоинты

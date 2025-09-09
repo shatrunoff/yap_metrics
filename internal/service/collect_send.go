@@ -52,6 +52,8 @@ func (as *AgentService) startSender() {
 			metrics := as.collector.GetMetrics()
 			if err := as.sender.SendJSON(metrics); err != nil {
 				log.Printf("FAIL to send metrics: %v", err)
+			} else {
+				log.Printf("Successfully sent %d metrics with gzip compression", len(metrics))
 			}
 		case <-as.doneChan:
 			return

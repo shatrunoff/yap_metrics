@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,7 +13,7 @@ import (
 	"strconv"
 	"time"
 
-	model "github.com/shatrunoff/yap_metrics/internal/model"
+	"github.com/shatrunoff/yap_metrics/internal/model"
 )
 
 type Sender struct {
@@ -55,6 +56,18 @@ func (s *Sender) SendJSON(metrics map[string]model.Metrics) error {
 			continue
 		}
 
+		// Сжимаем данные
+		var compressedData bytes.Buffer
+		gz := gzip.NewWriter(&compressedData)
+		if _, err := gz.Write(jsonData); err != nil {
+			log.Printf("ERROR: failed to compress data: %v", err)
+			continue
+		}
+		if err := gz.Close(); err != nil {
+			log.Printf("ERROR: failed to close gzip writer: %v", err)
+			continue
+		}
+
 		// Создаем запрос
 		url := "http://" + s.ServerURL + "/update/"
 		request, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(jsonData))
@@ -62,6 +75,8 @@ func (s *Sender) SendJSON(metrics map[string]model.Metrics) error {
 			return fmt.Errorf("FAILED to create request: %w", err)
 		}
 		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Content-Encoding", "gzip")
+		request.Header.Set("Accept-Encoding", "gzip")
 
 		// Отправляем
 		response, err := s.Client.Do(request)
