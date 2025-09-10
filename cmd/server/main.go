@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"log"
 	"net/http"
 	"os"
@@ -10,43 +9,42 @@ import (
 
 	"github.com/shatrunoff/yap_metrics/internal/config"
 	"github.com/shatrunoff/yap_metrics/internal/handler"
+	"github.com/shatrunoff/yap_metrics/internal/service"
 	"github.com/shatrunoff/yap_metrics/internal/storage"
 )
 
-func parseServerFlags() string {
-
-	// конфиг по умолчанию
-	cfg := config.DefaultAgentConfig()
-
-	// получаем флаги командной строки
-	flag.StringVar(&cfg.ServerURL, "a", cfg.ServerURL, "Server address host:port")
-	flag.Parse()
-
-	if flag.NArg() > 0 {
-		log.Fatalf("ERROR: unknown arguments: %v", flag.Args())
-	}
-
-	// проверяем переменные окружения
-	// ADDRESS
-	if envAddr := os.Getenv("ADDRESS"); envAddr != "" {
-		cfg.ServerURL = envAddr
-	}
-
-	return cfg.ServerURL
-}
-
 func main() {
-
-	serverAddress := parseServerFlags()
+	cfg := config.ParseServerConfig()
 	memStorage := storage.NewMemStorage()
 
+	// Загрузка метрик при старте
+	if cfg.Restore {
+		if err := memStorage.LoadFromFile(cfg.FileStoragePath); err != nil {
+			log.Printf("WARNING: failed to load metrics from file: %v", err)
+		} else {
+			log.Printf("Metrics loaded from %s", cfg.FileStoragePath)
+		}
+	}
+
+	// Создаем сервис для сохранения метрик
+	fileService := service.NewFileStorageService(memStorage, cfg.FileStoragePath, cfg.StoreInterval)
+
+	// Запускаем периодическое сохранение (если интервал не 0)
+	fileService.Start()
+	defer fileService.Stop()
+
+	// Создаем хэндлер с поддержкой синхронного сохранения
+	serverHandler := handler.NewHandler(memStorage, fileService, cfg.StoreInterval == 0)
+
 	server := &http.Server{
-		Addr:    serverAddress,
-		Handler: handler.NewHandler(memStorage),
+		Addr:    cfg.ServerURL,
+		Handler: serverHandler,
 	}
 
 	go func() {
 		log.Printf("Server started on %s", server.Addr)
+		log.Printf("Store interval: %v, File path: %s, Restore: %v",
+			cfg.StoreInterval, cfg.FileStoragePath, cfg.Restore)
 		err := server.ListenAndServe()
 		if err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server error: %v", err)

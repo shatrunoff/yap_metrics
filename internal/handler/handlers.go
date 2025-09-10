@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/shatrunoff/yap_metrics/internal/middleware"
 	"github.com/shatrunoff/yap_metrics/internal/model"
+	"github.com/shatrunoff/yap_metrics/internal/service"
 	"go.uber.org/zap"
 )
 
@@ -50,17 +51,15 @@ type Storage interface {
 }
 
 type Handler struct {
-	storage Storage
-	logger  *zap.Logger
-	sugar   *zap.SugaredLogger
+	storage     Storage
+	fileService *service.FileStorageService
+	syncSave    bool
+	logger      *zap.Logger
+	sugar       *zap.SugaredLogger
 }
 
 // хэндлер обновления метрики
 func (h *Handler) updateMetric(w http.ResponseWriter, r *http.Request) {
-
-	// для отладки
-	// log.Printf("Incoming update: %s %s", r.Method, r.URL.Path)
-
 	metricType := chi.URLParam(r, "type")
 	metricName := chi.URLParam(r, "name")
 	metricValue := chi.URLParam(r, "value")
@@ -70,6 +69,7 @@ func (h *Handler) updateMetric(w http.ResponseWriter, r *http.Request) {
 		value, err := strconv.ParseFloat(metricValue, 64)
 		if err != nil {
 			http.Error(w, "ERROR: invalid Gauge metric", http.StatusBadRequest)
+			return
 		}
 		h.storage.UpdateGauge(metricName, value)
 
@@ -77,12 +77,24 @@ func (h *Handler) updateMetric(w http.ResponseWriter, r *http.Request) {
 		delta, err := strconv.ParseInt(metricValue, 10, 64)
 		if err != nil {
 			http.Error(w, "ERROR: invalid Counter metric", http.StatusBadRequest)
+			return
 		}
 		h.storage.UpdateCounter(metricName, delta)
 
 	default:
-		http.Error(w, "ERROR: unknow metric type", http.StatusBadRequest)
+		http.Error(w, "ERROR: unknown metric type", http.StatusBadRequest)
+		return
 	}
+
+	// Синхронное сохранение
+	if h.syncSave {
+		if err := h.fileService.SaveSync(); err != nil {
+			h.logger.Error("Failed to save metrics synchronously", zap.Error(err))
+		} else {
+			h.logger.Info("Metrics saved synchronously")
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -155,6 +167,15 @@ func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Синхронное сохранение
+	if h.syncSave {
+		if err := h.fileService.SaveSync(); err != nil {
+			h.logger.Error("Failed to save metrics synchronously", zap.Error(err))
+		} else {
+			h.logger.Info("Metrics saved synchronously")
+		}
+	}
+
 	// Возвращаем обновленную метрику
 	updatedMetric, ok := h.storage.GetMetric(metric.MType, metric.ID)
 	if !ok {
@@ -205,7 +226,7 @@ func (h *Handler) getMetricJSON(w http.ResponseWriter, r *http.Request) {
 }
 
 // основной хэндлер
-func NewHandler(storage Storage) http.Handler {
+func NewHandler(storage Storage, fileService *service.FileStorageService, syncSave bool) http.Handler {
 	// инициализируем логгер
 	err := middleware.InitLogger()
 	if err != nil {
@@ -217,9 +238,11 @@ func NewHandler(storage Storage) http.Handler {
 	sugar := middleware.GetSugar()
 
 	handler := &Handler{
-		storage: storage,
-		logger:  logger,
-		sugar:   sugar,
+		storage:     storage,
+		fileService: fileService,
+		syncSave:    syncSave,
+		logger:      logger,
+		sugar:       sugar,
 	}
 
 	router := chi.NewRouter()

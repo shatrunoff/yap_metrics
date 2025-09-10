@@ -1,7 +1,10 @@
 package storage
 
 import (
+	"encoding/json"
+	"log"
 	"maps"
+	"os"
 	"sync"
 
 	"github.com/shatrunoff/yap_metrics/internal/model"
@@ -18,7 +21,62 @@ func NewMemStorage() *MemStorage {
 	}
 }
 
-// обнновление метрики
+// Загрузка метрик из файла
+func (m *MemStorage) LoadFromFile(filename string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	var metrics []model.Metrics
+	if err := json.Unmarshal(data, &metrics); err != nil {
+		return err
+	}
+
+	// Очищаем текущие метрики и загружаем новые
+	m.metrics = make(map[string]model.Metrics)
+	for _, metric := range metrics {
+		m.metrics[metric.ID] = metric
+	}
+
+	return nil
+}
+
+// Сохранение метрик в файл
+func (m *MemStorage) SaveToFile(filename string) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	log.Printf("Saving %d metrics to %s", len(m.metrics), filename)
+
+	metrics := make([]model.Metrics, 0, len(m.metrics))
+	for _, metric := range m.metrics {
+		metrics = append(metrics, metric)
+	}
+
+	data, err := json.MarshalIndent(metrics, "", "  ")
+	if err != nil {
+		log.Printf("ERROR: failed to marshal metrics: %v", err)
+		return err
+	}
+
+	err = os.WriteFile(filename, data, 0644)
+	if err != nil {
+		log.Printf("ERROR: failed to write file %s: %v", filename, err)
+		return err
+	}
+
+	log.Printf("Successfully saved %d metrics to %s", len(metrics), filename)
+	return nil
+}
+
+// обновление метрики
 func (m *MemStorage) UpdateGauge(name string, value float64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -30,7 +88,7 @@ func (m *MemStorage) UpdateGauge(name string, value float64) {
 	}
 }
 
-// обнновление счетчика
+// обновление счетчика
 func (m *MemStorage) UpdateCounter(name string, delta int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
