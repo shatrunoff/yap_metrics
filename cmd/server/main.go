@@ -33,6 +33,12 @@ func main() {
 	fileService.Start()
 	defer fileService.Stop()
 
+	go func() {
+		for err := range fileService.Err() {
+			log.Printf("File storage error: %v", err)
+		}
+	}()
+
 	// Создаем хэндлер с поддержкой синхронного сохранения
 	serverHandler := handler.NewHandler(memStorage, fileService, cfg.StoreInterval == 0)
 
@@ -45,8 +51,7 @@ func main() {
 		log.Printf("Server started on %s", server.Addr)
 		log.Printf("Store interval: %v, File path: %s, Restore: %v",
 			cfg.StoreInterval, cfg.FileStoragePath, cfg.Restore)
-		err := server.ListenAndServe()
-		if err != nil && err != http.ErrServerClosed {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server error: %v", err)
 		}
 	}()

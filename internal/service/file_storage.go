@@ -1,40 +1,58 @@
 package service
 
 import (
-	"log"
+	"context"
+	"fmt"
 	"sync"
 	"time"
-
-	"github.com/shatrunoff/yap_metrics/internal/storage"
 )
 
-type FileStorageService struct {
-	storage       *storage.MemStorage
-	filePath      string
-	storeInterval time.Duration
-	doneChan      chan struct{}
-	wg            sync.WaitGroup
-	mu            sync.Mutex
+// сохранение метрик в файл
+type Saver interface {
+	SaveToFile(path string) error
 }
 
-func NewFileStorageService(storage *storage.MemStorage, filePath string, storeInterval time.Duration) *FileStorageService {
+// запуск, остановка сохранения
+type FileStorageService struct {
+	storage       Saver
+	filePath      string
+	storeInterval time.Duration
+
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	wg    sync.WaitGroup
+	errCh chan error
+}
+
+// создаёт сервис работы с файлами
+func NewFileStorageService(
+	storage Saver,
+	filePath string,
+	storeInterval time.Duration,
+) *FileStorageService {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &FileStorageService{
 		storage:       storage,
 		filePath:      filePath,
 		storeInterval: storeInterval,
-		doneChan:      make(chan struct{}),
+		ctx:           ctx,
+		cancel:        cancel,
+		errCh:         make(chan error, 1),
 	}
 }
 
+// запускает периодическое сохранение
 func (fss *FileStorageService) Start() {
-	if fss.storeInterval > 0 {
-		// Периодическое сохранение
-		fss.wg.Add(1)
-		go func() {
-			defer fss.wg.Done()
-			fss.startPeriodicSave()
-		}()
+	if fss.storeInterval <= 0 {
+		return
 	}
+
+	fss.wg.Add(1)
+	go func() {
+		defer fss.wg.Done()
+		fss.startPeriodicSave()
+	}()
 }
 
 func (fss *FileStorageService) startPeriodicSave() {
@@ -45,29 +63,37 @@ func (fss *FileStorageService) startPeriodicSave() {
 		select {
 		case <-ticker.C:
 			if err := fss.storage.SaveToFile(fss.filePath); err != nil {
-				log.Printf("ERROR: failed to save metrics to file: %v", err)
-			} else {
-				log.Printf("Metrics successfully saved to %s", fss.filePath)
+				select {
+				case fss.errCh <- fmt.Errorf("periodic save failed: %w", err):
+				default:
+				}
 			}
-		case <-fss.doneChan:
-			// Сохраняем при завершении
+
+		case <-fss.ctx.Done():
 			if err := fss.storage.SaveToFile(fss.filePath); err != nil {
-				log.Printf("ERROR: failed to save metrics on shutdown: %v", err)
+				select {
+				case fss.errCh <- fmt.Errorf("shutdown save failed: %w", err):
+				default:
+				}
 			}
 			return
 		}
 	}
 }
 
+// завершает работу сервиса
 func (fss *FileStorageService) Stop() {
-	close(fss.doneChan)
+	fss.cancel()
 	fss.wg.Wait()
+	close(fss.errCh)
 }
 
-// Синхронное сохранение (для режима storeInterval=0)
-func (fss *FileStorageService) SaveSync() error {
-	fss.mu.Lock()
-	defer fss.mu.Unlock()
+// возвращает канал для получения ошибок
+func (fss *FileStorageService) Err() <-chan error {
+	return fss.errCh
+}
 
+// выполняет синхронное сохранение
+func (fss *FileStorageService) SaveSync() error {
 	return fss.storage.SaveToFile(fss.filePath)
 }
