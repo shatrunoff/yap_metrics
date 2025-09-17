@@ -1,7 +1,11 @@
 package agent
 
 import (
+	"bytes"
+	"compress/gzip"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -34,6 +38,71 @@ func newMetricURL(baseURL, metricType, metricID, value string) (string, error) {
 
 	u.Path = path.Join(u.Path, "update", metricType, metricID, value)
 	return u.String(), nil
+}
+
+// compressData сжимает данные с помощью gzip
+func compressData(data []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+
+	if _, err := gz.Write(data); err != nil {
+		return nil, err
+	}
+	if err := gz.Close(); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
+// Новый метод для отправки через JSON с поддержкой gzip
+func (s *Sender) SendJSON(metrics map[string]model.Metrics) error {
+	for _, metric := range metrics {
+		// Пропускаем метрики без значений
+		if (metric.MType == model.Gauge && metric.Value == nil) ||
+			(metric.MType == model.Counter && metric.Delta == nil) {
+			continue
+		}
+
+		// Подготавливаем JSON
+		jsonData, err := json.Marshal(metric)
+		if err != nil {
+			log.Printf("ERROR: failed to marshal metric %s: %v", metric.ID, err)
+			continue
+		}
+
+		// Сжимаем данные
+		compressedData, err := compressData(jsonData)
+		if err != nil {
+			log.Printf("ERROR: failed to compress data for metric %s: %v", metric.ID, err)
+			continue
+		}
+
+		// Создаем запрос
+		url := "http://" + s.ServerURL + "/update/"
+		request, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(compressedData))
+		if err != nil {
+			return fmt.Errorf("FAILED to create request: %w", err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Content-Encoding", "gzip")
+		request.Header.Set("Accept-Encoding", "gzip")
+
+		// Отправляем
+		response, err := s.Client.Do(request)
+		if err != nil {
+			return fmt.Errorf("FAILED to send metric %s: %w", metric.ID, err)
+		}
+		defer response.Body.Close()
+
+		// Читаем тело ответа для диагностики
+		body, _ := io.ReadAll(response.Body)
+
+		if response.StatusCode != http.StatusOK {
+			return fmt.Errorf("FAIL status for %s: %d, body: %s", metric.ID, response.StatusCode, string(body))
+		}
+	}
+	return nil
 }
 
 func (s *Sender) Send(metrics map[string]model.Metrics) error {
@@ -73,6 +142,7 @@ func (s *Sender) Send(metrics map[string]model.Metrics) error {
 			return fmt.Errorf("FAILED to create request: %w", err)
 		}
 		request.Header.Set("Content-Type", "text/plain")
+		request.Header.Set("Accept-Encoding", "gzip")
 
 		// отправляем
 		response, err := s.Client.Do(request)

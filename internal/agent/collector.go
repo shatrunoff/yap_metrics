@@ -2,9 +2,11 @@ package agent
 
 import (
 	"maps"
+	"math/rand"
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	model "github.com/shatrunoff/yap_metrics/internal/model"
 )
@@ -13,17 +15,18 @@ type MetricsCollector struct {
 	runtimeMetrics map[string]model.Metrics
 	PollCount      int64
 	mu             sync.RWMutex
+	rand           *rand.Rand
 }
 
 func NewMetricsCollector() *MetricsCollector {
 	return &MetricsCollector{
 		runtimeMetrics: make(map[string]model.Metrics),
+		rand:           rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
 // обновление gauge
 func (mc *MetricsCollector) updateGauge(name string, value float64) {
-
 	mc.runtimeMetrics[name] = model.Metrics{
 		ID:    name,
 		MType: model.Gauge,
@@ -33,7 +36,6 @@ func (mc *MetricsCollector) updateGauge(name string, value float64) {
 
 // обновление counter
 func (mc *MetricsCollector) updateCounter(name string, delta int64) {
-
 	if exist, ok := mc.runtimeMetrics[name]; ok && exist.Delta != nil {
 		*exist.Delta += delta
 		mc.runtimeMetrics[name] = exist
@@ -57,6 +59,9 @@ func (mc *MetricsCollector) Collect() {
 
 	// потокобезопасный ++
 	atomic.AddInt64(&mc.PollCount, 1)
+
+	// Генерируем случайное значение
+	randomValue := mc.rand.Float64()
 
 	// Создаем мапу метрик gauge
 	gaugeMetrics := map[string]float64{
@@ -87,6 +92,7 @@ func (mc *MetricsCollector) Collect() {
 		"StackSys":      float64(memStats.StackSys),
 		"Sys":           float64(memStats.Sys),
 		"TotalAlloc":    float64(memStats.TotalAlloc),
+		"RandomValue":   randomValue, // Добавляем случайное значение
 	}
 
 	// Обновляем метрики gauge в цикле
@@ -96,7 +102,6 @@ func (mc *MetricsCollector) Collect() {
 
 	// counter
 	mc.updateCounter("PollCount", 1)
-
 }
 
 // получение текущих метрик
