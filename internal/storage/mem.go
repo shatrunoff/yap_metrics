@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"maps"
@@ -19,6 +20,11 @@ func NewMemStorage() *MemStorage {
 	return &MemStorage{
 		metrics: make(map[string]model.Metrics),
 	}
+}
+
+// интерфейс для проверки соединения с хранилищем
+type Pinger interface {
+	Ping(ctx context.Context) error
 }
 
 // Загрузка метрик из файла

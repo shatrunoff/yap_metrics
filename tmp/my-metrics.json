@@ -1,5 +1,10 @@
 [
   {
+    "id": "NumGC",
+    "type": "counter",
+    "delta": 42
+  },
+  {
     "id": "test_gauge",
     "type": "gauge",
     "value": 42.5
@@ -18,10 +23,5 @@
     "id": "LastGC",
     "type": "gauge",
     "value": 1257894000000000000
-  },
-  {
-    "id": "NumGC",
-    "type": "counter",
-    "delta": 42
   }
 ]

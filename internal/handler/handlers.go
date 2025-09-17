@@ -1,17 +1,20 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
 	"sync"
 	"text/template"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/shatrunoff/yap_metrics/internal/middleware"
 	"github.com/shatrunoff/yap_metrics/internal/model"
 	"github.com/shatrunoff/yap_metrics/internal/service"
+	"github.com/shatrunoff/yap_metrics/internal/storage"
 	"go.uber.org/zap"
 )
 
@@ -56,6 +59,27 @@ type Handler struct {
 	syncSave    bool
 	logger      *zap.Logger
 	sugar       *zap.SugaredLogger
+	dbStorage   storage.Pinger
+}
+
+// handler проверки соединения с БД
+func (h *Handler) pingDB(w http.ResponseWriter, r *http.Request) {
+	if h.dbStorage == nil {
+		http.Error(w, "DB not configured", http.StatusInternalServerError)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	if err := h.dbStorage.Ping(ctx); err != nil {
+		h.logger.Error("DB ping failed", zap.Error(err))
+		http.Error(w, "DB connection failed", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("DB connection OK"))
 }
 
 // хэндлер обновления метрики
@@ -226,7 +250,7 @@ func (h *Handler) getMetricJSON(w http.ResponseWriter, r *http.Request) {
 }
 
 // основной хэндлер
-func NewHandler(storage Storage, fileService *service.FileStorageService, syncSave bool) http.Handler {
+func NewHandler(storage Storage, fileService *service.FileStorageService, syncSave bool, dbStorage storage.Pinger) http.Handler {
 	// инициализируем логгер
 	err := middleware.InitLogger()
 	if err != nil {
@@ -243,6 +267,7 @@ func NewHandler(storage Storage, fileService *service.FileStorageService, syncSa
 		syncSave:    syncSave,
 		logger:      logger,
 		sugar:       sugar,
+		dbStorage:   dbStorage,
 	}
 
 	router := chi.NewRouter()
@@ -259,6 +284,9 @@ func NewHandler(storage Storage, fileService *service.FileStorageService, syncSa
 	// Новые JSON эндпоинты
 	router.Post("/update/", handler.updateMetricJSON)
 	router.Post("/value/", handler.getMetricJSON)
+
+	// проверка соединения с БД
+	router.Get("/ping", handler.pingDB)
 
 	return router
 }

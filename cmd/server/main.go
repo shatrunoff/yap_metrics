@@ -17,6 +17,19 @@ func main() {
 	cfg := config.ParseServerConfig()
 	memStorage := storage.NewMemStorage()
 
+	var dbStorage *storage.PostgresStorage
+	var err error
+
+	// подключаем к БД, если указан DSN
+	if cfg.DatabaseDSN != "" {
+		dbStorage, err = storage.NewPostgresStorage(cfg.DatabaseDSN)
+		if err != nil {
+			log.Fatalf("Failed to connect to DB: %v", err)
+		}
+		defer dbStorage.Close()
+		log.Printf("Success connect to DB")
+	}
+
 	// Загрузка метрик при старте
 	if cfg.Restore {
 		if err := memStorage.LoadFromFile(cfg.FileStoragePath); err != nil {
@@ -40,7 +53,7 @@ func main() {
 	}()
 
 	// Создаем хэндлер с поддержкой синхронного сохранения
-	serverHandler := handler.NewHandler(memStorage, fileService, cfg.StoreInterval == 0)
+	serverHandler := handler.NewHandler(memStorage, fileService, cfg.StoreInterval == 0, dbStorage)
 
 	server := &http.Server{
 		Addr:    cfg.ServerURL,
