@@ -22,6 +22,7 @@ import (
 func main() {
 	cfg := config.ParseServerConfig()
 
+	// Логируем конфигурацию
 	log.Printf("Starting server with config: Address=%s, StoreInterval=%v, FileStoragePath=%s, Restore=%v, DatabaseDSN=%v",
 		cfg.ServerURL, cfg.StoreInterval, cfg.FileStoragePath, cfg.Restore, cfg.DatabaseDSN != "")
 
@@ -30,7 +31,7 @@ func main() {
 
 	// Приоритет 1: PostgreSQL если указан DSN
 	if cfg.DatabaseDSN != "" {
-		log.Printf("Initializing PostgreSQL storage...")
+		log.Printf("Initializing PostgreSQL storage with DSN: %s", cfg.DatabaseDSN)
 
 		// Сначала подключаемся к БД
 		db, err := connectToDatabase(cfg.DatabaseDSN)
@@ -61,7 +62,7 @@ func main() {
 
 	} else if cfg.FileStoragePath != "" {
 		// Приоритет 2: Файловое хранилище
-		log.Printf("Initializing file storage...")
+		log.Printf("Initializing file storage with path: %s", cfg.FileStoragePath)
 		memStorage := storage.NewMemStorage()
 
 		if cfg.Restore {
@@ -120,24 +121,36 @@ func main() {
 	<-stopChan
 
 	log.Printf("Shutting down server...")
-	server.Shutdown(context.Background())
+
+	// Graceful shutdown
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Printf("Server shutdown error: %v", err)
+	}
+
 	log.Printf("Server stopped")
 }
 
 func connectToDatabase(dsn string) (*sql.DB, error) {
+	log.Printf("Connecting to database...")
+
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
 	// Проверяем соединение
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
+
+	log.Printf("Database connection established successfully")
 
 	// Настраиваем пул соединений
 	db.SetMaxOpenConns(25)

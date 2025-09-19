@@ -19,7 +19,7 @@ func DefaultServerConfig() *ServerConfig {
 	return &ServerConfig{
 		ServerURL:       "localhost:8080",
 		StoreInterval:   300 * time.Second,
-		FileStoragePath: "tmp/my-metrics.json",
+		FileStoragePath: "/tmp/metrics-db.json",
 		Restore:         true,
 		DatabaseDSN:     "",
 	}
