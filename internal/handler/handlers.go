@@ -45,12 +45,17 @@ func initTemplates() {
 	})
 }
 
+// интерфейс для всех типов хранилищ
 type Storage interface {
 	Ping(ctx context.Context) error
 	UpdateGauge(ctx context.Context, name string, value float64) error
 	UpdateCounter(ctx context.Context, name string, delta int64) error
 	GetMetric(ctx context.Context, metricType, name string) (model.Metrics, error)
 	GetAll(ctx context.Context) (map[string]model.Metrics, error)
+}
+
+// интерфейс только для файлового хранилища
+type FileSaver interface {
 	SaveToFile(path string) error
 	LoadFromFile(filename string) error
 }
@@ -61,9 +66,9 @@ type Handler struct {
 	syncSave    bool
 	logger      *zap.Logger
 	sugar       *zap.SugaredLogger
+	fileSaver   FileSaver
 }
 
-// handler проверки соединения с БД
 func (h *Handler) pingDB(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
@@ -115,8 +120,8 @@ func (h *Handler) updateMetric(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Синхронное сохранение
-	if h.syncSave {
+	// Синхронное сохранение только для файлового хранилища
+	if h.syncSave && h.fileSaver != nil {
 		if err := h.fileService.SaveSync(); err != nil {
 			h.logger.Error("Failed to save metrics synchronously", zap.Error(err))
 		} else {
@@ -127,7 +132,6 @@ func (h *Handler) updateMetric(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// хэндлер получения метрики
 func (h *Handler) getMetric(w http.ResponseWriter, r *http.Request) {
 	metricType := chi.URLParam(r, "type")
 	metricName := chi.URLParam(r, "name")
@@ -151,7 +155,6 @@ func (h *Handler) getMetric(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// хэндлер получения всех метрик
 func (h *Handler) listMetrics(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -173,7 +176,6 @@ func (h *Handler) listMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// хэндлер обновления метрики через JSON
 func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Content-Type") != "application/json" {
 		http.Error(w, "ERROR: Content-Type must be application/json", http.StatusBadRequest)
@@ -224,8 +226,8 @@ func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Синхронное сохранение
-	if h.syncSave {
+	// Синхронное сохранение только для файлового хранилища
+	if h.syncSave && h.fileSaver != nil {
 		if err := h.fileService.SaveSync(); err != nil {
 			h.logger.Error("Failed to save metrics synchronously", zap.Error(err))
 		} else {
@@ -249,7 +251,6 @@ func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// хэндлер получения метрики через JSON
 func (h *Handler) getMetricJSON(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Content-Type") != "application/json" {
 		http.Error(w, "ERROR: Content-Type must be application/json", http.StatusBadRequest)
@@ -286,7 +287,6 @@ func (h *Handler) getMetricJSON(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// основной хэндлер
 func NewHandler(storage Storage, fileService *service.FileStorageService, syncSave bool) http.Handler {
 	// Инициализируем логгер
 	err := middleware.InitLogger()
@@ -304,6 +304,11 @@ func NewHandler(storage Storage, fileService *service.FileStorageService, syncSa
 		syncSave:    syncSave,
 		logger:      logger,
 		sugar:       sugar,
+	}
+
+	// Проверяем, поддерживает ли хранилище файловые операции
+	if fileSaver, ok := storage.(FileSaver); ok {
+		handler.fileSaver = fileSaver
 	}
 
 	router := chi.NewRouter()

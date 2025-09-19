@@ -227,3 +227,16 @@ func (ps *PostgresStorage) SaveToFile(path string) error {
 func (ps *PostgresStorage) LoadFromFile(filename string) error {
 	return nil
 }
+
+// создает хранилище из уже подключенной БД
+func NewPostgresStorageFromDB(db *sql.DB) (*PostgresStorage, error) {
+	// Проверяем, что соединение активно
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := db.PingContext(ctx); err != nil {
+		return nil, fmt.Errorf("database connection is not active: %w", err)
+	}
+
+	return &PostgresStorage{db: db}, nil
+}

@@ -93,6 +93,7 @@ func (ms *MemStorage) GetAll(ctx context.Context) (map[string]model.Metrics, err
 	return result, nil
 }
 
+// Методы для файлового хранилища (только для MemStorage)
 func (ms *MemStorage) SaveToFile(filePath string) error {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
