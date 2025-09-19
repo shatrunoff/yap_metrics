@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"time"
 
-	model "github.com/shatrunoff/yap_metrics/internal/model"
+	"github.com/shatrunoff/yap_metrics/internal/model"
 )
 
 type Sender struct {

@@ -64,21 +64,25 @@ func (fss *FileStorageService) startPeriodicSave() {
 		case <-ticker.C:
 			if err := fss.storage.SaveToFile(fss.filePath); err != nil {
 				select {
-				case fss.errCh <- fmt.Errorf("periodic save failed: %w", err):
+				case fss.errCh <- fmt.Errorf("failed to save metrics: %w", err):
 				default:
 				}
 			}
-
 		case <-fss.ctx.Done():
 			if err := fss.storage.SaveToFile(fss.filePath); err != nil {
 				select {
-				case fss.errCh <- fmt.Errorf("shutdown save failed: %w", err):
+				case fss.errCh <- fmt.Errorf("failed to save metrics on shutdown: %w", err):
 				default:
 				}
 			}
 			return
 		}
 	}
+}
+
+// выполняет синхронное сохранение
+func (fss *FileStorageService) SaveSync() error {
+	return fss.storage.SaveToFile(fss.filePath)
 }
 
 // завершает работу сервиса
@@ -91,9 +95,4 @@ func (fss *FileStorageService) Stop() {
 // возвращает канал для получения ошибок
 func (fss *FileStorageService) Err() <-chan error {
 	return fss.errCh
-}
-
-// выполняет синхронное сохранение
-func (fss *FileStorageService) SaveSync() error {
-	return fss.storage.SaveToFile(fss.filePath)
 }

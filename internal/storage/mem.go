@@ -1,10 +1,8 @@
 package storage
 
 import (
-	"context"
 	"encoding/json"
-	"log"
-	"maps"
+	"fmt"
 	"os"
 	"sync"
 
@@ -12,124 +10,126 @@ import (
 )
 
 type MemStorage struct {
-	metrics map[string]model.Metrics
-	mu      sync.RWMutex
+	gauges   map[string]float64
+	counters map[string]int64
+	mu       sync.RWMutex
 }
 
 func NewMemStorage() *MemStorage {
 	return &MemStorage{
-		metrics: make(map[string]model.Metrics),
+		gauges:   make(map[string]float64),
+		counters: make(map[string]int64),
 	}
 }
 
-// интерфейс для проверки соединения с хранилищем
-type Pinger interface {
-	Ping(ctx context.Context) error
+func (ms *MemStorage) UpdateGauge(name string, value float64) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	ms.gauges[name] = value
 }
 
-// Загрузка метрик из файла
-func (m *MemStorage) LoadFromFile(filename string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (ms *MemStorage) UpdateCounter(name string, delta int64) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	ms.counters[name] += delta
+}
 
-	data, err := os.ReadFile(filename)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
+func (ms *MemStorage) GetMetric(metricType, name string) (model.Metrics, bool) {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+
+	switch metricType {
+	case model.Gauge:
+		if value, ok := ms.gauges[name]; ok {
+			return model.Metrics{
+				ID:    name,
+				MType: model.Gauge,
+				Value: &value,
+			}, true
 		}
-		return err
+	case model.Counter:
+		if value, ok := ms.counters[name]; ok {
+			return model.Metrics{
+				ID:    name,
+				MType: model.Counter,
+				Delta: &value,
+			}, true
+		}
 	}
-
-	var metrics []model.Metrics
-	if err := json.Unmarshal(data, &metrics); err != nil {
-		return err
-	}
-
-	// Очищаем текущие метрики и загружаем новые
-	m.metrics = make(map[string]model.Metrics)
-	for _, metric := range metrics {
-		m.metrics[metric.ID] = metric
-	}
-
-	return nil
+	return model.Metrics{}, false
 }
 
-// Сохранение метрик в файл
-func (m *MemStorage) SaveToFile(filename string) error {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+func (ms *MemStorage) GetAll() map[string]model.Metrics {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
 
-	log.Printf("Saving %d metrics to %s", len(m.metrics), filename)
+	result := make(map[string]model.Metrics)
 
-	metrics := make([]model.Metrics, 0, len(m.metrics))
-	for _, metric := range m.metrics {
-		metrics = append(metrics, metric)
+	for name, value := range ms.gauges {
+		v := value
+		result[name] = model.Metrics{
+			ID:    name,
+			MType: model.Gauge,
+			Value: &v,
+		}
 	}
 
-	data, err := json.MarshalIndent(metrics, "", "  ")
-	if err != nil {
-		log.Printf("ERROR: failed to marshal metrics: %v", err)
-		return err
-	}
-
-	err = os.WriteFile(filename, data, 0644)
-	if err != nil {
-		log.Printf("ERROR: failed to write file %s: %v", filename, err)
-		return err
-	}
-
-	log.Printf("Successfully saved %d metrics to %s", len(metrics), filename)
-	return nil
-}
-
-// обновление метрики
-func (m *MemStorage) UpdateGauge(name string, value float64) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.metrics[name] = model.Metrics{
-		ID:    name,
-		MType: model.Gauge,
-		Value: &value,
-	}
-}
-
-// обновление счетчика
-func (m *MemStorage) UpdateCounter(name string, delta int64) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	exist, ok := m.metrics[name]
-	if ok && exist.Delta != nil {
-		*exist.Delta += delta
-		m.metrics[name] = exist
-	} else {
-		m.metrics[name] = model.Metrics{
+	for name, value := range ms.counters {
+		v := value
+		result[name] = model.Metrics{
 			ID:    name,
 			MType: model.Counter,
-			Delta: &delta,
+			Delta: &v,
 		}
 	}
+
+	return result
 }
 
-// получение 1й метрики
-func (m *MemStorage) GetMetric(metricType, name string) (model.Metrics, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+func (ms *MemStorage) SaveToFile(filePath string) error {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
 
-	metric, ok := m.metrics[name]
-	if !ok || metric.MType != metricType {
-		return model.Metrics{}, false
+	data := struct {
+		Gauges   map[string]float64 `json:"gauges"`
+		Counters map[string]int64   `json:"counters"`
+	}{
+		Gauges:   ms.gauges,
+		Counters: ms.counters,
 	}
-	return metric, true
+
+	jsonData, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal metrics: %w", err)
+	}
+
+	if err := os.WriteFile(filePath, jsonData, 0644); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	return nil
 }
 
-// получение всех метрик
-func (m *MemStorage) GetAll() map[string]model.Metrics {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+func (ms *MemStorage) LoadFromFile(filePath string) error {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
 
-	res := make(map[string]model.Metrics, len(m.metrics))
-	maps.Copy(res, m.metrics)
-	return res
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read file: %w", err)
+	}
+
+	var fileData struct {
+		Gauges   map[string]float64 `json:"gauges"`
+		Counters map[string]int64   `json:"counters"`
+	}
+
+	if err := json.Unmarshal(data, &fileData); err != nil {
+		return fmt.Errorf("failed to unmarshal metrics: %w", err)
+	}
+
+	ms.gauges = fileData.Gauges
+	ms.counters = fileData.Counters
+
+	return nil
 }

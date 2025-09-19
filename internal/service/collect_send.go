@@ -67,16 +67,13 @@ func (as *AgentService) Stop() {
 }
 
 func (as *AgentService) Run() {
-	// 2 горутины
 	as.wg.Add(2)
 
-	// запуск сбора
 	go func() {
 		defer as.wg.Done()
 		as.startCollector()
 	}()
 
-	// запуск отправки
 	go func() {
 		defer as.wg.Done()
 		as.startSender()

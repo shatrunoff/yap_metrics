@@ -55,7 +55,7 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 
 func LoggingMiddleware(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// проверка на nil
+
 		if Sugar == nil {
 			h.ServeHTTP(w, r)
 			return
