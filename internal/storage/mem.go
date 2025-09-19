@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -22,19 +23,25 @@ func NewMemStorage() *MemStorage {
 	}
 }
 
-func (ms *MemStorage) UpdateGauge(name string, value float64) {
+func (ms *MemStorage) Ping(ctx context.Context) error {
+	return nil
+}
+
+func (ms *MemStorage) UpdateGauge(ctx context.Context, name string, value float64) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	ms.gauges[name] = value
+	return nil
 }
 
-func (ms *MemStorage) UpdateCounter(name string, delta int64) {
+func (ms *MemStorage) UpdateCounter(ctx context.Context, name string, delta int64) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	ms.counters[name] += delta
+	return nil
 }
 
-func (ms *MemStorage) GetMetric(metricType, name string) (model.Metrics, bool) {
+func (ms *MemStorage) GetMetric(ctx context.Context, metricType, name string) (model.Metrics, error) {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 
@@ -45,7 +52,7 @@ func (ms *MemStorage) GetMetric(metricType, name string) (model.Metrics, bool) {
 				ID:    name,
 				MType: model.Gauge,
 				Value: &value,
-			}, true
+			}, nil
 		}
 	case model.Counter:
 		if value, ok := ms.counters[name]; ok {
@@ -53,13 +60,13 @@ func (ms *MemStorage) GetMetric(metricType, name string) (model.Metrics, bool) {
 				ID:    name,
 				MType: model.Counter,
 				Delta: &value,
-			}, true
+			}, nil
 		}
 	}
-	return model.Metrics{}, false
+	return model.Metrics{}, fmt.Errorf("metric %s not found", name)
 }
 
-func (ms *MemStorage) GetAll() map[string]model.Metrics {
+func (ms *MemStorage) GetAll(ctx context.Context) (map[string]model.Metrics, error) {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 
@@ -83,7 +90,7 @@ func (ms *MemStorage) GetAll() map[string]model.Metrics {
 		}
 	}
 
-	return result
+	return result, nil
 }
 
 func (ms *MemStorage) SaveToFile(filePath string) error {
@@ -116,6 +123,9 @@ func (ms *MemStorage) LoadFromFile(filePath string) error {
 
 	data, err := os.ReadFile(filePath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return fmt.Errorf("failed to read file: %w", err)
 	}
 
@@ -131,5 +141,9 @@ func (ms *MemStorage) LoadFromFile(filePath string) error {
 	ms.gauges = fileData.Gauges
 	ms.counters = fileData.Counters
 
+	return nil
+}
+
+func (ms *MemStorage) Close() error {
 	return nil
 }

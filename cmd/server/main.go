@@ -53,7 +53,7 @@ func main() {
 	}()
 
 	// Создаем хэндлер с поддержкой синхронного сохранения
-	serverHandler := handler.NewHandler(memStorage, fileService, cfg.StoreInterval == 0, dbStorage)
+	serverHandler := handler.NewHandler(memStorage, fileService, cfg.StoreInterval == 0)
 
 	server := &http.Server{
 		Addr:    cfg.ServerURL,
