@@ -1,27 +1,182 @@
 [
   {
-    "id": "another_gauge",
+    "id": "GCSys",
     "type": "gauge",
-    "value": 3.14
+    "value": 1862416
+  },
+  {
+    "id": "Sys",
+    "type": "gauge",
+    "value": 6967312
+  },
+  {
+    "id": "NextGC",
+    "type": "gauge",
+    "value": 4194304
+  },
+  {
+    "id": "GetSetZip40",
+    "type": "gauge",
+    "value": 886473.0258365326
+  },
+  {
+    "id": "GetSet51",
+    "type": "counter",
+    "delta": 2097493815
+  },
+  {
+    "id": "Lookups",
+    "type": "gauge",
+    "value": 0
+  },
+  {
+    "id": "StackInuse",
+    "type": "gauge",
+    "value": 393216
+  },
+  {
+    "id": "Alloc",
+    "type": "gauge",
+    "value": 1143744
+  },
+  {
+    "id": "MSpanSys",
+    "type": "gauge",
+    "value": 48960
+  },
+  {
+    "id": "PopulateCounter4661019",
+    "type": "counter",
+    "delta": 0
+  },
+  {
+    "id": "OtherSys",
+    "type": "gauge",
+    "value": 842545
+  },
+  {
+    "id": "GetSetZip172",
+    "type": "gauge",
+    "value": 826430.7743368057
+  },
+  {
+    "id": "HeapIdle",
+    "type": "gauge",
+    "value": 2105344
+  },
+  {
+    "id": "StackSys",
+    "type": "gauge",
+    "value": 393216
+  },
+  {
+    "id": "HeapAlloc",
+    "type": "gauge",
+    "value": 1143744
+  },
+  {
+    "id": "HeapReleased",
+    "type": "gauge",
+    "value": 2072576
+  },
+  {
+    "id": "NumGC",
+    "type": "gauge",
+    "value": 0
+  },
+  {
+    "id": "MCacheInuse",
+    "type": "gauge",
+    "value": 14496
+  },
+  {
+    "id": "HeapInuse",
+    "type": "gauge",
+    "value": 1695744
+  },
+  {
+    "id": "Mallocs",
+    "type": "gauge",
+    "value": 1451
+  },
+  {
+    "id": "BuckHashSys",
+    "type": "gauge",
+    "value": 3383
+  },
+  {
+    "id": "GCCPUFraction",
+    "type": "gauge",
+    "value": 0
+  },
+  {
+    "id": "NumForcedGC",
+    "type": "gauge",
+    "value": 0
+  },
+  {
+    "id": "MSpanInuse",
+    "type": "gauge",
+    "value": 34240
+  },
+  {
+    "id": "RandomValue",
+    "type": "gauge",
+    "value": 0.444791993090588
+  },
+  {
+    "id": "TotalAlloc",
+    "type": "gauge",
+    "value": 1143744
+  },
+  {
+    "id": "PauseTotalNs",
+    "type": "gauge",
+    "value": 0
+  },
+  {
+    "id": "GetSetZip132",
+    "type": "counter",
+    "delta": 2549070294
+  },
+  {
+    "id": "MCacheSys",
+    "type": "gauge",
+    "value": 15704
+  },
+  {
+    "id": "HeapObjects",
+    "type": "gauge",
+    "value": 1135
+  },
+  {
+    "id": "Frees",
+    "type": "gauge",
+    "value": 316
+  },
+  {
+    "id": "GetSet24",
+    "type": "gauge",
+    "value": 89076.88367353073
   },
   {
     "id": "LastGC",
     "type": "gauge",
-    "value": 1257894000000000000
+    "value": 0
   },
   {
-    "id": "NumGC",
+    "id": "GetSetZip216",
     "type": "counter",
-    "delta": 42
+    "delta": 2592703309
   },
   {
-    "id": "test_gauge",
+    "id": "PollCount",
+    "type": "counter",
+    "delta": 45
+  },
+  {
+    "id": "HeapSys",
     "type": "gauge",
-    "value": 42.5
-  },
-  {
-    "id": "test_counter",
-    "type": "counter",
-    "delta": 10
+    "value": 3801088
   }
 ]
