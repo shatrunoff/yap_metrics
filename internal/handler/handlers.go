@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -10,6 +11,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/shatrunoff/yap_metrics/internal/middleware"
 	"github.com/shatrunoff/yap_metrics/internal/model"
+	"github.com/shatrunoff/yap_metrics/internal/service"
+	"go.uber.org/zap"
 )
 
 const htmlPage = `
@@ -48,15 +51,15 @@ type Storage interface {
 }
 
 type Handler struct {
-	storage Storage
+	storage     Storage
+	fileService *service.FileStorageService
+	syncSave    bool
+	logger      *zap.Logger
+	sugar       *zap.SugaredLogger
 }
 
 // хэндлер обновления метрики
 func (h *Handler) updateMetric(w http.ResponseWriter, r *http.Request) {
-
-	// для отладки
-	// log.Printf("Incoming update: %s %s", r.Method, r.URL.Path)
-
 	metricType := chi.URLParam(r, "type")
 	metricName := chi.URLParam(r, "name")
 	metricValue := chi.URLParam(r, "value")
@@ -66,6 +69,7 @@ func (h *Handler) updateMetric(w http.ResponseWriter, r *http.Request) {
 		value, err := strconv.ParseFloat(metricValue, 64)
 		if err != nil {
 			http.Error(w, "ERROR: invalid Gauge metric", http.StatusBadRequest)
+			return
 		}
 		h.storage.UpdateGauge(metricName, value)
 
@@ -73,12 +77,24 @@ func (h *Handler) updateMetric(w http.ResponseWriter, r *http.Request) {
 		delta, err := strconv.ParseInt(metricValue, 10, 64)
 		if err != nil {
 			http.Error(w, "ERROR: invalid Counter metric", http.StatusBadRequest)
+			return
 		}
 		h.storage.UpdateCounter(metricName, delta)
 
 	default:
-		http.Error(w, "ERROR: unknow metric type", http.StatusBadRequest)
+		http.Error(w, "ERROR: unknown metric type", http.StatusBadRequest)
+		return
 	}
+
+	// Синхронное сохранение
+	if h.syncSave {
+		if err := h.fileService.SaveSync(); err != nil {
+			h.logger.Error("Failed to save metrics synchronously", zap.Error(err))
+		} else {
+			h.logger.Info("Metrics saved synchronously")
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -105,21 +121,144 @@ func (h *Handler) listMetrics(w http.ResponseWriter, r *http.Request) {
 	metrics := h.storage.GetAll()
 	initTemplates()
 
+	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusOK)
 	metricsTemplate.Execute(w, metrics)
 }
 
+// хэндлер обновления метрики через JSON
+func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
+	var metric model.Metrics
+
+	if r.Header.Get("Content-Type") != "application/json" {
+		http.Error(w, "ERROR: Content-Type must be application/json", http.StatusBadRequest)
+		return
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&metric); err != nil {
+		h.logger.Error("Failed to decode JSON", zap.Error(err))
+		http.Error(w, "ERROR: invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if metric.ID == "" {
+		http.Error(w, "ERROR: metric ID is required", http.StatusBadRequest)
+		return
+	}
+
+	switch metric.MType {
+	case model.Gauge:
+		if metric.Value == nil {
+			http.Error(w, "ERROR: value is required for gauge", http.StatusBadRequest)
+			return
+		}
+		h.storage.UpdateGauge(metric.ID, *metric.Value)
+
+	case model.Counter:
+		if metric.Delta == nil {
+			http.Error(w, "ERROR: delta is required for counter", http.StatusBadRequest)
+			return
+		}
+		h.storage.UpdateCounter(metric.ID, *metric.Delta)
+
+	default:
+		http.Error(w, "ERROR: unknown metric type", http.StatusBadRequest)
+		return
+	}
+
+	// Синхронное сохранение
+	if h.syncSave {
+		if err := h.fileService.SaveSync(); err != nil {
+			h.logger.Error("Failed to save metrics synchronously", zap.Error(err))
+		} else {
+			h.logger.Info("Metrics saved synchronously")
+		}
+	}
+
+	// Возвращаем обновленную метрику
+	updatedMetric, ok := h.storage.GetMetric(metric.MType, metric.ID)
+	if !ok {
+		http.Error(w, "ERROR: failed to get updated metric", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(updatedMetric); err != nil {
+		h.logger.Error("Failed to encode JSON response", zap.Error(err))
+		http.Error(w, "ERROR: failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+// хэндлер получения метрики через JSON
+func (h *Handler) getMetricJSON(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Content-Type") != "application/json" {
+		http.Error(w, "ERROR: Content-Type must be application/json", http.StatusBadRequest)
+		return
+	}
+
+	var metric model.Metrics
+
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&metric); err != nil {
+		h.logger.Error("Failed to decode JSON", zap.Error(err))
+		http.Error(w, "ERROR: invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if metric.ID == "" || metric.MType == "" {
+		http.Error(w, "ERROR: metric ID and type are required", http.StatusBadRequest)
+		return
+	}
+
+	foundMetric, ok := h.storage.GetMetric(metric.MType, metric.ID)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(foundMetric); err != nil {
+		h.logger.Error("Failed to encode JSON response", zap.Error(err))
+		http.Error(w, "ERROR: failed to encode response", http.StatusInternalServerError)
+	}
+}
+
 // основной хэндлер
-func NewHandler(storage Storage) http.Handler {
-	handler := &Handler{storage: storage}
+func NewHandler(storage Storage, fileService *service.FileStorageService, syncSave bool) http.Handler {
+	// инициализируем логгер
+	err := middleware.InitLogger()
+	if err != nil {
+		panic(err)
+	}
+
+	// получаем логгер
+	logger := middleware.GetLogger()
+	sugar := middleware.GetSugar()
+
+	handler := &Handler{
+		storage:     storage,
+		fileService: fileService,
+		syncSave:    syncSave,
+		logger:      logger,
+		sugar:       sugar,
+	}
+
 	router := chi.NewRouter()
 
+	router.Use(middleware.GzipDecompressionMiddleware)
 	router.Use(middleware.LoggingMiddleware)
+	router.Use(middleware.GzipCompressionMiddleware)
 
+	// Старые эндпоинты
 	router.Post("/update/{type}/{name}/{value}", handler.updateMetric)
 	router.Get("/value/{type}/{name}", handler.getMetric)
 	router.Get("/", handler.listMetrics)
 
-	return router
+	// Новые JSON эндпоинты
+	router.Post("/update/", handler.updateMetricJSON)
+	router.Post("/value/", handler.getMetricJSON)
 
+	return router
 }

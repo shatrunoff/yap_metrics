@@ -24,3 +24,5 @@ vendor/
 .idea
 .vscode
 metricstest-darwin-arm64
+
+*.DS_Store
