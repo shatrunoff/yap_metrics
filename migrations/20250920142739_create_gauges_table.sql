@@ -1,0 +1,9 @@
+-- +goose Up
+CREATE TABLE IF NOT EXISTS gauges (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    value DOUBLE PRECISION NOT NULL
+);
+
+-- +goose Down
+DROP TABLE IF EXISTS gauges;

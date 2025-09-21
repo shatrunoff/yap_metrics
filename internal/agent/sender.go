@@ -55,7 +55,7 @@ func compressData(data []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Новый метод для отправки через JSON с поддержкой gzip
+// метод для отправки через JSON с поддержкой gzip
 func (s *Sender) SendJSON(metrics map[string]model.Metrics) error {
 	for _, metric := range metrics {
 		// Пропускаем метрики без значений
@@ -155,5 +155,63 @@ func (s *Sender) Send(metrics map[string]model.Metrics) error {
 			return fmt.Errorf("FAIL status for %s: %d", metric.ID, response.StatusCode)
 		}
 	}
+	return nil
+}
+
+// отправляет метрики батчами через JSON с поддержкой gzip
+func (s *Sender) SendBatch(metrics []model.Metrics) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+
+	// Фильтруем метрики без значений
+	validMetrics := make([]model.Metrics, 0, len(metrics))
+	for _, metric := range metrics {
+		if (metric.MType == model.Gauge && metric.Value != nil) ||
+			(metric.MType == model.Counter && metric.Delta != nil) {
+			validMetrics = append(validMetrics, metric)
+		}
+	}
+
+	if len(validMetrics) == 0 {
+		return nil
+	}
+
+	// Подготавливаем JSON
+	jsonData, err := json.Marshal(validMetrics)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metrics batch: %w", err)
+	}
+
+	// Сжимаем данные
+	compressedData, err := compressData(jsonData)
+	if err != nil {
+		return fmt.Errorf("failed to compress batch data: %w", err)
+	}
+
+	// Создаем запрос
+	url := "http://" + s.ServerURL + "/updates/"
+	request, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(compressedData))
+	if err != nil {
+		return fmt.Errorf("failed to create batch request: %w", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Content-Encoding", "gzip")
+	request.Header.Set("Accept-Encoding", "gzip")
+
+	// Отправляем
+	response, err := s.Client.Do(request)
+	if err != nil {
+		return fmt.Errorf("failed to send metrics batch: %w", err)
+	}
+	defer response.Body.Close()
+
+	// Читаем тело ответа для диагностики
+	body, _ := io.ReadAll(response.Body)
+
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("batch request failed: status %d, body: %s", response.StatusCode, string(body))
+	}
+
 	return nil
 }

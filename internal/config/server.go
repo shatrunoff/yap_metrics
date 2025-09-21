@@ -12,6 +12,7 @@ type ServerConfig struct {
 	StoreInterval   time.Duration
 	FileStoragePath string
 	Restore         bool
+	DatabaseDSN     string
 }
 
 func DefaultServerConfig() *ServerConfig {
@@ -20,6 +21,7 @@ func DefaultServerConfig() *ServerConfig {
 		StoreInterval:   300 * time.Second,
 		FileStoragePath: "tmp/my-metrics.json",
 		Restore:         true,
+		DatabaseDSN:     "",
 	}
 }
 
@@ -32,6 +34,7 @@ func ParseServerConfig() *ServerConfig {
 	flag.IntVar(&storeIntervalSec, "i", int(cfg.StoreInterval.Seconds()), "Store interval in seconds")
 	flag.StringVar(&cfg.FileStoragePath, "f", cfg.FileStoragePath, "File storage path")
 	flag.BoolVar(&cfg.Restore, "r", cfg.Restore, "Restore from file")
+	flag.StringVar(&cfg.DatabaseDSN, "d", cfg.DatabaseDSN, "Database DSN")
 	flag.Parse()
 
 	// Переменные окружения
@@ -50,6 +53,9 @@ func ParseServerConfig() *ServerConfig {
 		if restore, err := strconv.ParseBool(envRestore); err == nil {
 			cfg.Restore = restore
 		}
+	}
+	if envDSN := os.Getenv("DATABASE_DSN"); envDSN != "" {
+		cfg.DatabaseDSN = envDSN
 	}
 
 	return cfg
