@@ -291,6 +291,88 @@ func (h *Handler) getMetricJSON(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// хэндлер обновления метрик батчами
+func (h *Handler) updateMetricsBatch(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Content-Type") != "application/json" {
+		http.Error(w, "ERROR: Content-Type must be application/json", http.StatusBadRequest)
+		return
+	}
+
+	var metrics []model.Metrics
+
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&metrics); err != nil {
+		h.logger.Error("Failed to decode JSON batch", zap.Error(err))
+		http.Error(w, "ERROR: invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if len(metrics) == 0 {
+		http.Error(w, "ERROR: empty metrics batch", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Используем batch, если хранилище поддерживает
+	if batchStorage, ok := h.storage.(interface {
+		UpdateMetricsBatch(ctx context.Context, metrics []model.Metrics) error
+	}); ok {
+		// batch метод
+		if err := batchStorage.UpdateMetricsBatch(ctx, metrics); err != nil {
+			h.logger.Error("Failed to update metrics batch", zap.Error(err))
+			http.Error(w, "ERROR: failed to update metrics batch", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// обрабатываем по одной метрике
+		var hasErrors bool
+		for _, metric := range metrics {
+			if metric.ID == "" {
+				continue
+			}
+
+			var err error
+			switch metric.MType {
+			case model.Gauge:
+				if metric.Value != nil {
+					err = h.storage.UpdateGauge(ctx, metric.ID, *metric.Value)
+				}
+
+			case model.Counter:
+				if metric.Delta != nil {
+					err = h.storage.UpdateCounter(ctx, metric.ID, *metric.Delta)
+				}
+			}
+
+			// обработка остальных метрик и логируем ошибку
+			if err != nil {
+				h.logger.Error("Failed to update metric in batch",
+					zap.String("id", metric.ID),
+					zap.String("type", metric.MType),
+					zap.Error(err))
+				hasErrors = true
+			}
+		}
+
+		if hasErrors {
+			http.Error(w, "ERROR: some metrics failed to update", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Синхронное сохранение только для файлового хранилища
+	if h.syncSave && h.fileSaver != nil {
+		if err := h.fileService.SaveSync(); err != nil {
+			h.logger.Error("Failed to save metrics synchronously after batch", zap.Error(err))
+		} else {
+			h.logger.Info("Metrics saved synchronously after batch update")
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 // основной хэндлер
 func NewHandler(storage storage.Storage, fileService *service.FileStorageService, syncSave bool) http.Handler {
 	// Инициализируем логгер
@@ -326,14 +408,15 @@ func NewHandler(storage storage.Storage, fileService *service.FileStorageService
 	router.Use(middleware.LoggingMiddleware)
 	router.Use(middleware.GzipCompressionMiddleware)
 
-	// Старые эндпоинты
+	// эндпоинты единичных запросов
 	router.Post("/update/{type}/{name}/{value}", handler.updateMetric)
 	router.Get("/value/{type}/{name}", handler.getMetric)
 	router.Get("/", handler.listMetrics)
 
-	// Новые JSON эндпоинты
+	// JSON эндпоинты
 	router.Post("/update/", handler.updateMetricJSON)
 	router.Post("/value/", handler.getMetricJSON)
+	router.Post("/updates/", handler.updateMetricsBatch)
 
 	// Проверка соединения с БД
 	router.Get("/ping", handler.pingDB)

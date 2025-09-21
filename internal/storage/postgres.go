@@ -274,3 +274,47 @@ func (ps *PostgresStorage) SaveToFile(path string) error {
 func (ps *PostgresStorage) LoadFromFile(filename string) error {
 	return nil
 }
+
+// обновление метрик в БД батчами
+func (ps *PostgresStorage) UpdateMetricsBatch(ctx context.Context, metrics []model.Metrics) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+
+	log.Printf("Processing batch of %d metrics", len(metrics))
+
+	// Обрабатываем каждую метрику отдельно
+	for i, metric := range metrics {
+		if metric.ID == "" {
+			continue
+		}
+
+		log.Printf("Processing metric %d: %s (%s)", i+1, metric.ID, metric.MType)
+
+		var err error
+		switch metric.MType {
+		case model.Gauge:
+			if metric.Value != nil {
+				log.Printf("Updating gauge %s with value %f", metric.ID, *metric.Value)
+				err = ps.UpdateGauge(ctx, metric.ID, *metric.Value)
+			}
+
+		case model.Counter:
+			if metric.Delta != nil {
+				log.Printf("Updating counter %s with delta %d", metric.ID, *metric.Delta)
+				err = ps.UpdateCounter(ctx, metric.ID, *metric.Delta)
+			}
+
+		default:
+			log.Printf("Skipping unknown metric type: %s", metric.MType)
+			continue
+		}
+
+		if err != nil {
+			log.Printf("ERROR updating metric %s: %v", metric.ID, err)
+		}
+	}
+
+	log.Printf("Batch processing completed")
+	return nil
+}

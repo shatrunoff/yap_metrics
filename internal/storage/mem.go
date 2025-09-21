@@ -147,3 +147,33 @@ func (ms *MemStorage) LoadFromFile(filePath string) error {
 
 	return nil
 }
+
+// обновление метрик батчами
+func (ms *MemStorage) UpdateMetricsBatch(ctx context.Context, metrics []model.Metrics) error {
+	if len(metrics) == 0 {
+		return nil
+	}
+
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	for _, metric := range metrics {
+		if metric.ID == "" {
+			continue
+		}
+
+		switch metric.MType {
+		case model.Gauge:
+			if metric.Value != nil {
+				ms.gauges[metric.ID] = *metric.Value
+			}
+
+		case model.Counter:
+			if metric.Delta != nil {
+				ms.counters[metric.ID] += *metric.Delta
+			}
+		}
+	}
+
+	return nil
+}

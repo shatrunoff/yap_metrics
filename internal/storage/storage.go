@@ -11,6 +11,7 @@ type Storage interface {
 	Ping(ctx context.Context) error
 	UpdateGauge(ctx context.Context, name string, value float64) error
 	UpdateCounter(ctx context.Context, name string, delta int64) error
+	UpdateMetricsBatch(ctx context.Context, metrics []model.Metrics) error
 	GetMetric(ctx context.Context, metricType, name string) (model.Metrics, error)
 	GetAll(ctx context.Context) (map[string]model.Metrics, error)
 	Close() error

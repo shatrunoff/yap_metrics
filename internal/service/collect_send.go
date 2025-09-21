@@ -7,6 +7,7 @@ import (
 
 	"github.com/shatrunoff/yap_metrics/internal/agent"
 	"github.com/shatrunoff/yap_metrics/internal/config"
+	"github.com/shatrunoff/yap_metrics/internal/model"
 )
 
 type AgentService struct {
@@ -46,16 +47,45 @@ func (as *AgentService) startSender() {
 	ticker := time.NewTicker(as.config.ReportInterval)
 	defer ticker.Stop()
 
+	// Буфер для накопления метрик
+	var metricsBuffer []model.Metrics
+	bufferSize := 10
+
 	for {
 		select {
 		case <-ticker.C:
-			metrics := as.collector.GetMetrics()
-			if err := as.sender.SendJSON(metrics); err != nil {
-				log.Printf("FAIL to send metrics: %v", err)
-			} else {
-				log.Printf("Successfully sent %d metrics with gzip compression", len(metrics))
+			// все метрики
+			allMetrics := as.collector.GetMetrics()
+
+			// map в slice
+			metricsSlice := make([]model.Metrics, 0, len(allMetrics))
+			for _, metric := range allMetrics {
+				metricsSlice = append(metricsSlice, metric)
 			}
+
+			// Добавляем в буфер
+			metricsBuffer = append(metricsBuffer, metricsSlice...)
+
+			// Если буфер достиг размера батча или больше, то отправляем
+			if len(metricsBuffer) >= bufferSize {
+				if err := as.sender.SendBatch(metricsBuffer); err != nil {
+					log.Printf("FAIL to send metrics batch: %v", err)
+				} else {
+					log.Printf("Successfully sent batch of %d metrics", len(metricsBuffer))
+				}
+				// Очищаем буфер после отправки
+				metricsBuffer = nil
+			}
+
 		case <-as.doneChan:
+			// При остановке отправляем оставшиеся метрики
+			if len(metricsBuffer) > 0 {
+				if err := as.sender.SendBatch(metricsBuffer); err != nil {
+					log.Printf("FAIL to send final metrics batch: %v", err)
+				} else {
+					log.Printf("Successfully sent final batch of %d metrics", len(metricsBuffer))
+				}
+			}
 			return
 		}
 	}
