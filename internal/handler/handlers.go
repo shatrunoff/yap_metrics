@@ -1,36 +1,49 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
 	"sync"
 	"text/template"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/shatrunoff/yap_metrics/internal/middleware"
 	"github.com/shatrunoff/yap_metrics/internal/model"
 	"github.com/shatrunoff/yap_metrics/internal/service"
+	"github.com/shatrunoff/yap_metrics/internal/storage"
 	"go.uber.org/zap"
 )
 
 const htmlPage = `
-	<!DOCTYPE html>
-	<html>
-	<head><title>Metrics</title></head>
-	<body>
-	<h1>Metrics</h1>
-	<ul>
-		{{range $name, $metric := .}}
-			<li>{{$metric.MType}} {{$metric.ID}}:
-				{{if eq $metric.MType "` + model.Gauge + `"}}{{$metric.Value}}{{end}}
-				{{if eq $metric.MType "` + model.Counter + `"}}{{$metric.Delta}}{{end}}
-			</li>
-		{{end}}
-	</ul>
-	</body>
-	</html>`
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Metrics</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        h1 { color: #333; }
+        ul { list-style-type: none; padding: 0; }
+        li { padding: 8px; margin: 4px; background: #f5f5f5; border-radius: 4px; }
+        .metric-type { font-weight: bold; color: #555; }
+    </style>
+</head>
+<body>
+    <h1>Metrics</h1>
+    <ul>
+        {{range $name, $metric := .}}
+            <li>
+                <span class="metric-type">{{$metric.MType}}</span> {{$metric.ID}}:
+                {{if eq $metric.MType "gauge"}}{{$metric.Value}}{{end}}
+                {{if eq $metric.MType "counter"}}{{$metric.Delta}}{{end}}
+            </li>
+        {{end}}
+    </ul>
+</body>
+</html>`
 
 var (
 	metricsTemplate *template.Template
@@ -43,19 +56,30 @@ func initTemplates() {
 	})
 }
 
-type Storage interface {
-	UpdateGauge(name string, value float64)
-	UpdateCounter(name string, delta int64)
-	GetMetric(metricType, name string) (model.Metrics, bool)
-	GetAll() map[string]model.Metrics
-}
-
 type Handler struct {
-	storage     Storage
+	storage     storage.Storage
 	fileService *service.FileStorageService
 	syncSave    bool
 	logger      *zap.Logger
 	sugar       *zap.SugaredLogger
+	fileSaver   interface {
+		SaveToFile(path string) error
+		LoadFromFile(filename string) error
+	}
+}
+
+func (h *Handler) pingDB(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	if err := h.storage.Ping(ctx); err != nil {
+		h.logger.Error("DB ping failed", zap.Error(err))
+		http.Error(w, "DB connection failed", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("DB connection OK"))
 }
 
 // хэндлер обновления метрики
@@ -64,6 +88,8 @@ func (h *Handler) updateMetric(w http.ResponseWriter, r *http.Request) {
 	metricName := chi.URLParam(r, "name")
 	metricValue := chi.URLParam(r, "value")
 
+	ctx := r.Context()
+
 	switch metricType {
 	case model.Gauge:
 		value, err := strconv.ParseFloat(metricValue, 64)
@@ -71,7 +97,11 @@ func (h *Handler) updateMetric(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "ERROR: invalid Gauge metric", http.StatusBadRequest)
 			return
 		}
-		h.storage.UpdateGauge(metricName, value)
+		if err := h.storage.UpdateGauge(ctx, metricName, value); err != nil {
+			h.logger.Error("Failed to update gauge", zap.Error(err))
+			http.Error(w, "ERROR: failed to update gauge", http.StatusInternalServerError)
+			return
+		}
 
 	case model.Counter:
 		delta, err := strconv.ParseInt(metricValue, 10, 64)
@@ -79,15 +109,19 @@ func (h *Handler) updateMetric(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "ERROR: invalid Counter metric", http.StatusBadRequest)
 			return
 		}
-		h.storage.UpdateCounter(metricName, delta)
+		if err := h.storage.UpdateCounter(ctx, metricName, delta); err != nil {
+			h.logger.Error("Failed to update counter", zap.Error(err))
+			http.Error(w, "ERROR: failed to update counter", http.StatusInternalServerError)
+			return
+		}
 
 	default:
 		http.Error(w, "ERROR: unknown metric type", http.StatusBadRequest)
 		return
 	}
 
-	// Синхронное сохранение
-	if h.syncSave {
+	// Синхронное сохранение только для файлового хранилища
+	if h.syncSave && h.fileSaver != nil {
 		if err := h.fileService.SaveSync(); err != nil {
 			h.logger.Error("Failed to save metrics synchronously", zap.Error(err))
 		} else {
@@ -103,37 +137,55 @@ func (h *Handler) getMetric(w http.ResponseWriter, r *http.Request) {
 	metricType := chi.URLParam(r, "type")
 	metricName := chi.URLParam(r, "name")
 
-	metric, ok := h.storage.GetMetric(metricType, metricName)
-	if !ok {
+	ctx := r.Context()
+
+	metric, err := h.storage.GetMetric(ctx, metricType, metricName)
+	if err != nil {
+		h.logger.Warn("Metric not found", zap.String("type", metricType), zap.String("name", metricName), zap.Error(err))
 		http.NotFound(w, r)
 		return
 	}
+
 	switch metric.MType {
 	case model.Gauge:
 		fmt.Fprintf(w, "%g", *metric.Value)
 	case model.Counter:
 		fmt.Fprintf(w, "%d", *metric.Delta)
+	default:
+		http.Error(w, "ERROR: unknown metric type", http.StatusInternalServerError)
 	}
 }
 
 // хэндлер получения всех метрик
 func (h *Handler) listMetrics(w http.ResponseWriter, r *http.Request) {
-	metrics := h.storage.GetAll()
+	ctx := r.Context()
+
+	metrics, err := h.storage.GetAll(ctx)
+	if err != nil {
+		h.logger.Error("Failed to get all metrics", zap.Error(err))
+		http.Error(w, "ERROR: failed to retrieve metrics", http.StatusInternalServerError)
+		return
+	}
+
 	initTemplates()
 
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusOK)
-	metricsTemplate.Execute(w, metrics)
+
+	if err := metricsTemplate.Execute(w, metrics); err != nil {
+		h.logger.Error("Failed to execute template", zap.Error(err))
+		http.Error(w, "ERROR: failed to render metrics", http.StatusInternalServerError)
+	}
 }
 
 // хэндлер обновления метрики через JSON
 func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
-	var metric model.Metrics
-
 	if r.Header.Get("Content-Type") != "application/json" {
 		http.Error(w, "ERROR: Content-Type must be application/json", http.StatusBadRequest)
 		return
 	}
+
+	var metric model.Metrics
 
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&metric); err != nil {
@@ -147,28 +199,38 @@ func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := r.Context()
+
 	switch metric.MType {
 	case model.Gauge:
 		if metric.Value == nil {
 			http.Error(w, "ERROR: value is required for gauge", http.StatusBadRequest)
 			return
 		}
-		h.storage.UpdateGauge(metric.ID, *metric.Value)
+		if err := h.storage.UpdateGauge(ctx, metric.ID, *metric.Value); err != nil {
+			h.logger.Error("Failed to update gauge via JSON", zap.Error(err))
+			http.Error(w, "ERROR: failed to update gauge", http.StatusInternalServerError)
+			return
+		}
 
 	case model.Counter:
 		if metric.Delta == nil {
 			http.Error(w, "ERROR: delta is required for counter", http.StatusBadRequest)
 			return
 		}
-		h.storage.UpdateCounter(metric.ID, *metric.Delta)
+		if err := h.storage.UpdateCounter(ctx, metric.ID, *metric.Delta); err != nil {
+			h.logger.Error("Failed to update counter via JSON", zap.Error(err))
+			http.Error(w, "ERROR: failed to update counter", http.StatusInternalServerError)
+			return
+		}
 
 	default:
 		http.Error(w, "ERROR: unknown metric type", http.StatusBadRequest)
 		return
 	}
 
-	// Синхронное сохранение
-	if h.syncSave {
+	// Синхронное сохранение только для файлового хранилища
+	if h.syncSave && h.fileSaver != nil {
 		if err := h.fileService.SaveSync(); err != nil {
 			h.logger.Error("Failed to save metrics synchronously", zap.Error(err))
 		} else {
@@ -177,8 +239,9 @@ func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Возвращаем обновленную метрику
-	updatedMetric, ok := h.storage.GetMetric(metric.MType, metric.ID)
-	if !ok {
+	updatedMetric, err := h.storage.GetMetric(ctx, metric.MType, metric.ID)
+	if err != nil {
+		h.logger.Error("Failed to get updated metric", zap.Error(err))
 		http.Error(w, "ERROR: failed to get updated metric", http.StatusInternalServerError)
 		return
 	}
@@ -212,8 +275,11 @@ func (h *Handler) getMetricJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	foundMetric, ok := h.storage.GetMetric(metric.MType, metric.ID)
-	if !ok {
+	ctx := r.Context()
+
+	foundMetric, err := h.storage.GetMetric(ctx, metric.MType, metric.ID)
+	if err != nil {
+		h.logger.Warn("Metric not found via JSON", zap.String("type", metric.MType), zap.String("id", metric.ID), zap.Error(err))
 		http.NotFound(w, r)
 		return
 	}
@@ -226,14 +292,14 @@ func (h *Handler) getMetricJSON(w http.ResponseWriter, r *http.Request) {
 }
 
 // основной хэндлер
-func NewHandler(storage Storage, fileService *service.FileStorageService, syncSave bool) http.Handler {
-	// инициализируем логгер
+func NewHandler(storage storage.Storage, fileService *service.FileStorageService, syncSave bool) http.Handler {
+	// Инициализируем логгер
 	err := middleware.InitLogger()
 	if err != nil {
-		panic(err)
+		panic(fmt.Sprintf("Failed to initialize logger: %v", err))
 	}
 
-	// получаем логгер
+	// Получаем логгер
 	logger := middleware.GetLogger()
 	sugar := middleware.GetSugar()
 
@@ -245,8 +311,17 @@ func NewHandler(storage Storage, fileService *service.FileStorageService, syncSa
 		sugar:       sugar,
 	}
 
+	// Проверяем, поддерживает ли хранилище файловые операции
+	if fileSaver, ok := storage.(interface {
+		SaveToFile(path string) error
+		LoadFromFile(filename string) error
+	}); ok {
+		handler.fileSaver = fileSaver
+	}
+
 	router := chi.NewRouter()
 
+	// Middleware
 	router.Use(middleware.GzipDecompressionMiddleware)
 	router.Use(middleware.LoggingMiddleware)
 	router.Use(middleware.GzipCompressionMiddleware)
@@ -259,6 +334,9 @@ func NewHandler(storage Storage, fileService *service.FileStorageService, syncSa
 	// Новые JSON эндпоинты
 	router.Post("/update/", handler.updateMetricJSON)
 	router.Post("/value/", handler.getMetricJSON)
+
+	// Проверка соединения с БД
+	router.Get("/ping", handler.pingDB)
 
 	return router
 }

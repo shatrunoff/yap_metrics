@@ -1,27 +1,41 @@
-[
-  {
-    "id": "test_gauge",
-    "type": "gauge",
-    "value": 42.5
+{
+  "gauges": {
+    "Alloc": 1130456,
+    "BuckHashSys": 3383,
+    "Frees": 162,
+    "GCCPUFraction": 0,
+    "GCSys": 1862416,
+    "GetSet162": 510606.93759893306,
+    "GetSet76": 804613.2924351665,
+    "GetSetZip48": 805527.2409056224,
+    "HeapAlloc": 1130456,
+    "HeapIdle": 2039808,
+    "HeapInuse": 1761280,
+    "HeapObjects": 944,
+    "HeapReleased": 1974272,
+    "HeapSys": 3801088,
+    "LastGC": 0,
+    "Lookups": 0,
+    "MCacheInuse": 14496,
+    "MCacheSys": 15704,
+    "MSpanInuse": 44320,
+    "MSpanSys": 48960,
+    "Mallocs": 1106,
+    "NextGC": 4194304,
+    "NumForcedGC": 0,
+    "NumGC": 0,
+    "OtherSys": 1104689,
+    "PauseTotalNs": 0,
+    "RandomValue": 0.49540887987696114,
+    "StackInuse": 393216,
+    "StackSys": 393216,
+    "Sys": 7229456,
+    "TotalAlloc": 1130456
   },
-  {
-    "id": "test_counter",
-    "type": "counter",
-    "delta": 10
-  },
-  {
-    "id": "another_gauge",
-    "type": "gauge",
-    "value": 3.14
-  },
-  {
-    "id": "LastGC",
-    "type": "gauge",
-    "value": 1257894000000000000
-  },
-  {
-    "id": "NumGC",
-    "type": "counter",
-    "delta": 42
+  "counters": {
+    "GetSet13": 2703031666,
+    "GetSet190": 3822657666,
+    "GetSetZip108": 716775393,
+    "PollCount": 35
   }
-]
+}

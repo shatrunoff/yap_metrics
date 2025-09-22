@@ -26,3 +26,4 @@ vendor/
 metricstest-darwin-arm64
 
 *.DS_Store
+test.sh
