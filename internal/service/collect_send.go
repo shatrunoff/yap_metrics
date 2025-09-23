@@ -68,7 +68,7 @@ func (as *AgentService) startSender() {
 
 			// Если буфер достиг размера батча или больше, то отправляем
 			if len(metricsBuffer) >= bufferSize {
-				if err := as.sender.SendBatch(metricsBuffer); err != nil {
+				if err := as.sender.SendBatchWithRetry(metricsBuffer); err != nil {
 					log.Printf("FAIL to send metrics batch: %v", err)
 				} else {
 					log.Printf("Successfully sent batch of %d metrics", len(metricsBuffer))
@@ -80,7 +80,7 @@ func (as *AgentService) startSender() {
 		case <-as.doneChan:
 			// При остановке отправляем оставшиеся метрики
 			if len(metricsBuffer) > 0 {
-				if err := as.sender.SendBatch(metricsBuffer); err != nil {
+				if err := as.sender.SendBatchWithRetry(metricsBuffer); err != nil {
 					log.Printf("FAIL to send final metrics batch: %v", err)
 				} else {
 					log.Printf("Successfully sent final batch of %d metrics", len(metricsBuffer))

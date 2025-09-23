@@ -10,6 +10,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 	"github.com/shatrunoff/yap_metrics/internal/model"
+	"github.com/shatrunoff/yap_metrics/internal/utils"
 )
 
 // хранилище
@@ -69,55 +70,69 @@ func (ps *PostgresStorage) Close() error {
 }
 
 func (ps *PostgresStorage) UpdateGauge(ctx context.Context, name string, value float64) error {
-	// Сначала пытаемся обновить, если запись существует
-	updateQuery := `UPDATE gauges SET value = $1 WHERE name = $2`
-	result, err := ps.db.ExecContext(ctx, updateQuery, value, name)
-	if err != nil {
-		return fmt.Errorf("failed to update gauge %s: %w", name, err)
-	}
-
-	// Проверяем, была ли обновлена хотя бы одна строка
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected for gauge %s: %w", name, err)
-	}
-
-	// Если ни одна строка не была обновлена, вставляем новую
-	if rowsAffected == 0 {
-		insertQuery := `INSERT INTO gauges (name, value) VALUES ($1, $2)`
-		_, err := ps.db.ExecContext(ctx, insertQuery, name, value)
+	// Retry на уровне всей функции
+	return utils.RetrySendWithArgs(ctx, "UpdateGauge", func(ctx context.Context, args struct {
+		Name  string
+		Value float64
+	}) error {
+		// Вся логика функции внутри retry
+		updateQuery := `UPDATE gauges SET value = $1 WHERE name = $2`
+		result, err := ps.db.ExecContext(ctx, updateQuery, args.Value, args.Name)
 		if err != nil {
-			return fmt.Errorf("failed to insert gauge %s: %w", name, err)
+			return fmt.Errorf("failed to update gauge %s: %w", args.Name, err)
 		}
-	}
 
-	return nil
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to get rows affected for gauge %s: %w", args.Name, err)
+		}
+
+		if rowsAffected == 0 {
+			insertQuery := `INSERT INTO gauges (name, value) VALUES ($1, $2)`
+			_, err := ps.db.ExecContext(ctx, insertQuery, args.Name, args.Value)
+			if err != nil {
+				return fmt.Errorf("failed to insert gauge %s: %w", args.Name, err)
+			}
+		}
+
+		return nil
+	}, struct {
+		Name  string
+		Value float64
+	}{Name: name, Value: value})
 }
 
 func (ps *PostgresStorage) UpdateCounter(ctx context.Context, name string, delta int64) error {
-	// Сначала пытаемся обновить, если запись существует
-	updateQuery := `UPDATE counters SET value = value + $1 WHERE name = $2`
-	result, err := ps.db.ExecContext(ctx, updateQuery, delta, name)
-	if err != nil {
-		return fmt.Errorf("failed to update counter %s: %w", name, err)
-	}
-
-	// Проверяем, была ли обновлена хотя бы одна строка
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected for counter %s: %w", name, err)
-	}
-
-	// Если ни одна строка не была обновлена, вставляем новую
-	if rowsAffected == 0 {
-		insertQuery := `INSERT INTO counters (name, value) VALUES ($1, $2)`
-		_, err := ps.db.ExecContext(ctx, insertQuery, name, delta)
+	// Retry на уровне функции операции
+	return utils.RetrySendWithArgs(ctx, "UpdateCounter", func(ctx context.Context, args struct {
+		Name  string
+		Delta int64
+	}) error {
+		// Вся логика функции внутри retry
+		updateQuery := `UPDATE counters SET value = value + $1 WHERE name = $2`
+		result, err := ps.db.ExecContext(ctx, updateQuery, args.Delta, args.Name)
 		if err != nil {
-			return fmt.Errorf("failed to insert counter %s: %w", name, err)
+			return fmt.Errorf("failed to update counter %s: %w", args.Name, err)
 		}
-	}
 
-	return nil
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to get rows affected for counter %s: %w", args.Name, err)
+		}
+
+		if rowsAffected == 0 {
+			insertQuery := `INSERT INTO counters (name, value) VALUES ($1, $2)`
+			_, err := ps.db.ExecContext(ctx, insertQuery, args.Name, args.Delta)
+			if err != nil {
+				return fmt.Errorf("failed to insert counter %s: %w", args.Name, err)
+			}
+		}
+
+		return nil
+	}, struct {
+		Name  string
+		Delta int64
+	}{Name: name, Delta: delta})
 }
 
 // получение метрики из БД
@@ -132,48 +147,80 @@ func (ps *PostgresStorage) GetMetric(ctx context.Context, metricType, name strin
 	}
 }
 
-// получение gauge из БД
+// получение gauge из БД с retry
 func (ps *PostgresStorage) getGauge(ctx context.Context, name string) (model.Metrics, error) {
-	query := `SELECT name, value FROM gauges WHERE name = $1`
+	var result model.Metrics
+	var lastErr error
 
-	var metricName string
-	var value float64
+	// Retry на уровне всей операции получения
+	err := utils.RetrySendWithArgs(ctx, "getGauge", func(ctx context.Context, name string) error {
+		query := `SELECT name, value FROM gauges WHERE name = $1`
 
-	err := ps.db.QueryRowContext(ctx, query, name).Scan(&metricName, &value)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return model.Metrics{}, fmt.Errorf("gauge %s not found", name)
+		var metricName string
+		var value float64
+
+		err := ps.db.QueryRowContext(ctx, query, name).Scan(&metricName, &value)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				lastErr = fmt.Errorf("gauge %s not found", name)
+				return lastErr
+			}
+			lastErr = fmt.Errorf("failed to get gauge %s: %w", name, err)
+			return lastErr
 		}
-		return model.Metrics{}, fmt.Errorf("failed to get gauge %s: %w", name, err)
+
+		result = model.Metrics{
+			ID:    metricName,
+			MType: model.Gauge,
+			Value: &value,
+		}
+		lastErr = nil
+		return nil
+	}, name)
+
+	if err != nil {
+		return model.Metrics{}, lastErr
 	}
 
-	return model.Metrics{
-		ID:    metricName,
-		MType: model.Gauge,
-		Value: &value,
-	}, nil
+	return result, nil
 }
 
-// получение counter из БД
+// получение counter из БД с retry
 func (ps *PostgresStorage) getCounter(ctx context.Context, name string) (model.Metrics, error) {
-	query := `SELECT name, value FROM counters WHERE name = $1`
+	var result model.Metrics
+	var lastErr error
 
-	var metricName string
-	var value int64
+	// Retry на уровне всей операции получения
+	err := utils.RetrySendWithArgs(ctx, "getCounter", func(ctx context.Context, name string) error {
+		query := `SELECT name, value FROM counters WHERE name = $1`
 
-	err := ps.db.QueryRowContext(ctx, query, name).Scan(&metricName, &value)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return model.Metrics{}, fmt.Errorf("counter %s not found", name)
+		var metricName string
+		var value int64
+
+		err := ps.db.QueryRowContext(ctx, query, name).Scan(&metricName, &value)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				lastErr = fmt.Errorf("counter %s not found", name)
+				return lastErr
+			}
+			lastErr = fmt.Errorf("failed to get counter %s: %w", name, err)
+			return lastErr
 		}
-		return model.Metrics{}, fmt.Errorf("failed to get counter %s: %w", name, err)
+
+		result = model.Metrics{
+			ID:    metricName,
+			MType: model.Counter,
+			Delta: &value,
+		}
+		lastErr = nil
+		return nil
+	}, name)
+
+	if err != nil {
+		return model.Metrics{}, lastErr
 	}
 
-	return model.Metrics{
-		ID:    metricName,
-		MType: model.Counter,
-		Delta: &value,
-	}, nil
+	return result, nil
 }
 
 // получение всех метрик из БД
@@ -199,72 +246,95 @@ func (ps *PostgresStorage) GetAll(ctx context.Context) (map[string]model.Metrics
 	return metrics, nil
 }
 
-// получение всех gauge из БД
+// получение всех gauge из БД с retry
 func (ps *PostgresStorage) getAllGauges(ctx context.Context) (map[string]model.Metrics, error) {
-	query := `SELECT name, value FROM gauges`
+	var result map[string]model.Metrics
 
-	rows, err := ps.db.QueryContext(ctx, query)
+	// Используем пустую структуру как аргумент
+	err := utils.RetrySendWithArgs(ctx, "getAllGauges", func(ctx context.Context, _ struct{}) error {
+		query := `SELECT name, value FROM gauges`
+
+		rows, err := ps.db.QueryContext(ctx, query)
+		if err != nil {
+			return fmt.Errorf("failed to query gauges: %w", err)
+		}
+		defer rows.Close()
+
+		metrics := make(map[string]model.Metrics)
+		for rows.Next() {
+			var name string
+			var value float64
+
+			if err := rows.Scan(&name, &value); err != nil {
+				return fmt.Errorf("failed to scan gauge: %w", err)
+			}
+
+			v := value
+			metrics[name] = model.Metrics{
+				ID:    name,
+				MType: model.Gauge,
+				Value: &v,
+			}
+		}
+
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("error iterating gauges: %w", err)
+		}
+
+		result = metrics
+		return nil
+	}, struct{}{})
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to query gauges: %w", err)
-	}
-	defer rows.Close()
-
-	metrics := make(map[string]model.Metrics)
-	for rows.Next() {
-		var name string
-		var value float64
-
-		if err := rows.Scan(&name, &value); err != nil {
-			return nil, fmt.Errorf("failed to scan gauge: %w", err)
-		}
-
-		v := value
-		metrics[name] = model.Metrics{
-			ID:    name,
-			MType: model.Gauge,
-			Value: &v,
-		}
+		return nil, err
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating gauges: %w", err)
-	}
-
-	return metrics, nil
+	return result, nil
 }
 
-// получение всех counter из БД
+// получение всех counter из БД с retry
 func (ps *PostgresStorage) getAllCounters(ctx context.Context) (map[string]model.Metrics, error) {
-	query := `SELECT name, value FROM counters`
+	var result map[string]model.Metrics
 
-	rows, err := ps.db.QueryContext(ctx, query)
+	err := utils.RetrySendWithArgs(ctx, "getAllCounters", func(ctx context.Context, _ struct{}) error {
+		query := `SELECT name, value FROM counters`
+
+		rows, err := ps.db.QueryContext(ctx, query)
+		if err != nil {
+			return fmt.Errorf("failed to query counters: %w", err)
+		}
+		defer rows.Close()
+
+		metrics := make(map[string]model.Metrics)
+		for rows.Next() {
+			var name string
+			var value int64
+
+			if err := rows.Scan(&name, &value); err != nil {
+				return fmt.Errorf("failed to scan counter: %w", err)
+			}
+
+			v := value
+			metrics[name] = model.Metrics{
+				ID:    name,
+				MType: model.Counter,
+				Delta: &v,
+			}
+		}
+
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("error iterating counters: %w", err)
+		}
+
+		result = metrics
+		return nil
+	}, struct{}{})
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to query counters: %w", err)
-	}
-	defer rows.Close()
-
-	metrics := make(map[string]model.Metrics)
-	for rows.Next() {
-		var name string
-		var value int64
-
-		if err := rows.Scan(&name, &value); err != nil {
-			return nil, fmt.Errorf("failed to scan counter: %w", err)
-		}
-
-		v := value
-		metrics[name] = model.Metrics{
-			ID:    name,
-			MType: model.Counter,
-			Delta: &v,
-		}
+		return nil, err
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating counters: %w", err)
-	}
-
-	return metrics, nil
+	return result, nil
 }
 
 // Методы для совместимости с файловым интерфейсом (не реализованы для PostgreSQL)

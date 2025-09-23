@@ -13,7 +13,8 @@ import (
 	"strconv"
 	"time"
 
-	model "github.com/shatrunoff/yap_metrics/internal/model"
+	"github.com/shatrunoff/yap_metrics/internal/model"
+	"github.com/shatrunoff/yap_metrics/internal/utils"
 )
 
 type Sender struct {
@@ -149,13 +150,20 @@ func (s *Sender) Send(metrics map[string]model.Metrics) error {
 		if err != nil {
 			return fmt.Errorf("FAILED to send metric %s: %w", metric.ID, err)
 		}
-		response.Body.Close()
+		defer response.Body.Close()
 
 		if response.StatusCode != http.StatusOK {
 			return fmt.Errorf("FAIL status for %s: %d", metric.ID, response.StatusCode)
 		}
 	}
 	return nil
+}
+
+// обертка с retry для SendBatch
+func (s *Sender) SendBatchWithRetry(metrics []model.Metrics) error {
+	return utils.RetrySendWithArgsNoCtx("SendBatch", func(metrics []model.Metrics) error {
+		return s.SendBatch(metrics)
+	}, metrics)
 }
 
 // отправляет метрики батчами через JSON с поддержкой gzip
