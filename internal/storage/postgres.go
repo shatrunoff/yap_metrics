@@ -71,7 +71,7 @@ func (ps *PostgresStorage) Close() error {
 
 func (ps *PostgresStorage) UpdateGauge(ctx context.Context, name string, value float64) error {
 	// Retry на уровне всей функции
-	return utils.RetrySendWithArgs(ctx, "UpdateGauge", func(ctx context.Context, args struct {
+	return utils.RetryPostgres(ctx, "UpdateGauge", func(ctx context.Context, args struct {
 		Name  string
 		Value float64
 	}) error {
@@ -104,7 +104,7 @@ func (ps *PostgresStorage) UpdateGauge(ctx context.Context, name string, value f
 
 func (ps *PostgresStorage) UpdateCounter(ctx context.Context, name string, delta int64) error {
 	// Retry на уровне функции операции
-	return utils.RetrySendWithArgs(ctx, "UpdateCounter", func(ctx context.Context, args struct {
+	return utils.RetryPostgres(ctx, "UpdateCounter", func(ctx context.Context, args struct {
 		Name  string
 		Delta int64
 	}) error {
@@ -153,7 +153,7 @@ func (ps *PostgresStorage) getGauge(ctx context.Context, name string) (model.Met
 	var lastErr error
 
 	// Retry на уровне всей операции получения
-	err := utils.RetrySendWithArgs(ctx, "getGauge", func(ctx context.Context, name string) error {
+	err := utils.RetryPostgres(ctx, "getGauge", func(ctx context.Context, name string) error {
 		query := `SELECT name, value FROM gauges WHERE name = $1`
 
 		var metricName string
@@ -191,7 +191,7 @@ func (ps *PostgresStorage) getCounter(ctx context.Context, name string) (model.M
 	var lastErr error
 
 	// Retry на уровне всей операции получения
-	err := utils.RetrySendWithArgs(ctx, "getCounter", func(ctx context.Context, name string) error {
+	err := utils.RetryPostgres(ctx, "getCounter", func(ctx context.Context, name string) error {
 		query := `SELECT name, value FROM counters WHERE name = $1`
 
 		var metricName string
@@ -251,7 +251,7 @@ func (ps *PostgresStorage) getAllGauges(ctx context.Context) (map[string]model.M
 	var result map[string]model.Metrics
 
 	// Используем пустую структуру как аргумент
-	err := utils.RetrySendWithArgs(ctx, "getAllGauges", func(ctx context.Context, _ struct{}) error {
+	err := utils.RetryPostgres(ctx, "getAllGauges", func(ctx context.Context, _ struct{}) error {
 		query := `SELECT name, value FROM gauges`
 
 		rows, err := ps.db.QueryContext(ctx, query)
@@ -296,7 +296,7 @@ func (ps *PostgresStorage) getAllGauges(ctx context.Context) (map[string]model.M
 func (ps *PostgresStorage) getAllCounters(ctx context.Context) (map[string]model.Metrics, error) {
 	var result map[string]model.Metrics
 
-	err := utils.RetrySendWithArgs(ctx, "getAllCounters", func(ctx context.Context, _ struct{}) error {
+	err := utils.RetryPostgres(ctx, "getAllCounters", func(ctx context.Context, _ struct{}) error {
 		query := `SELECT name, value FROM counters`
 
 		rows, err := ps.db.QueryContext(ctx, query)
@@ -353,38 +353,72 @@ func (ps *PostgresStorage) UpdateMetricsBatch(ctx context.Context, metrics []mod
 
 	log.Printf("Processing batch of %d metrics", len(metrics))
 
-	// Обрабатываем каждую метрику отдельно
-	for i, metric := range metrics {
-		if metric.ID == "" {
-			continue
-		}
+	// Разбиваем метрики по типам для читаемости
+	gauges, counters, unknown := splitMetricsByType(metrics)
 
-		log.Printf("Processing metric %d: %s (%s)", i+1, metric.ID, metric.MType)
-
-		var err error
-		switch metric.MType {
-		case model.Gauge:
-			if metric.Value != nil {
-				log.Printf("Updating gauge %s with value %f", metric.ID, *metric.Value)
-				err = ps.UpdateGauge(ctx, metric.ID, *metric.Value)
-			}
-
-		case model.Counter:
-			if metric.Delta != nil {
-				log.Printf("Updating counter %s with delta %d", metric.ID, *metric.Delta)
-				err = ps.UpdateCounter(ctx, metric.ID, *metric.Delta)
-			}
-
-		default:
-			log.Printf("Skipping unknown metric type: %s", metric.MType)
-			continue
-		}
-
-		if err != nil {
-			log.Printf("ERROR updating metric %s: %v", metric.ID, err)
+	if len(unknown) > 0 {
+		for _, m := range unknown {
+			log.Printf("Skipping unknown metric type: %s (id=%s)", m.MType, m.ID)
 		}
 	}
 
+	// Обрабатываем gauge метрики батчем
+	ps.updateGaugesBatch(ctx, gauges)
+
+	// Обрабатываем counter метрики батчем
+	ps.updateCountersBatch(ctx, counters)
+
 	log.Printf("Batch processing completed")
 	return nil
+}
+
+// splitMetricsByType группирует входные метрики по типам для последующей обработки
+func splitMetricsByType(metrics []model.Metrics) (gauges []model.Metrics, counters []model.Metrics, unknown []model.Metrics) {
+	for _, m := range metrics {
+		if m.ID == "" {
+			continue
+		}
+
+		switch m.MType {
+		case model.Gauge:
+			if m.Value != nil {
+				gauges = append(gauges, m)
+			}
+		case model.Counter:
+			if m.Delta != nil {
+				counters = append(counters, m)
+			}
+		default:
+			unknown = append(unknown, m)
+		}
+	}
+	return
+}
+
+// updateGaugesBatch обрабатывает батч gauge-метрик
+func (ps *PostgresStorage) updateGaugesBatch(ctx context.Context, gauges []model.Metrics) {
+	if len(gauges) == 0 {
+		return
+	}
+	log.Printf("Updating %d gauge metrics", len(gauges))
+	for i, m := range gauges {
+		log.Printf("[%d/%d] gauge %s", i+1, len(gauges), m.ID)
+		if err := ps.UpdateGauge(ctx, m.ID, *m.Value); err != nil {
+			log.Printf("ERROR updating gauge %s: %v", m.ID, err)
+		}
+	}
+}
+
+// updateCountersBatch обрабатывает батч counter-метрик
+func (ps *PostgresStorage) updateCountersBatch(ctx context.Context, counters []model.Metrics) {
+	if len(counters) == 0 {
+		return
+	}
+	log.Printf("Updating %d counter metrics", len(counters))
+	for i, m := range counters {
+		log.Printf("[%d/%d] counter %s", i+1, len(counters), m.ID)
+		if err := ps.UpdateCounter(ctx, m.ID, *m.Delta); err != nil {
+			log.Printf("ERROR updating counter %s: %v", m.ID, err)
+		}
+	}
 }

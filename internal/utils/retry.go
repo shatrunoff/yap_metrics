@@ -16,7 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// конфигурация для повторных попыток
+// описывает базовые параметры retry
 type RetryConfig struct {
 	MaxAttempts int
 	Backoffs    []time.Duration
@@ -30,13 +30,50 @@ func DefaultRetryConfig() RetryConfig {
 	}
 }
 
-// проверяет, является ли ошибка ошибкой соединения (для агента)
+// определяет стратегию повторных попыток
+type RetryStrategy interface {
+	MaxAttempts() int
+	Backoff(attempt int) time.Duration
+	ShouldRetry(err error) bool
+}
+
+// базовая реализация общих частей стратегии
+type baseStrategy struct{ cfg RetryConfig }
+
+func (b baseStrategy) MaxAttempts() int { return b.cfg.MaxAttempts }
+func (b baseStrategy) Backoff(attempt int) time.Duration {
+	return getBackoffForAttempt(b.cfg.Backoffs, attempt)
+}
+
+// стратегия для сетевых ошибок (агент)
+type NetworkRetryStrategy struct{ baseStrategy }
+
+func NewNetworkRetryStrategy(cfg RetryConfig) RetryStrategy {
+	return NetworkRetryStrategy{baseStrategy{cfg: cfg}}
+}
+
+func (NetworkRetryStrategy) ShouldRetry(err error) bool { return IsConnectionError(err) }
+
+// стратегия для ошибок подключения к PostgreSQL
+type PostgresRetryStrategy struct{ baseStrategy }
+
+func NewPostgresRetryStrategy(cfg RetryConfig) RetryStrategy {
+	return PostgresRetryStrategy{baseStrategy{cfg: cfg}}
+}
+
+func (PostgresRetryStrategy) ShouldRetry(err error) bool {
+	if pgErr, ok := err.(*pgconn.PgError); ok {
+		return isConnectionPostgresError(pgErr)
+	}
+	return false
+}
+
+// проверяет, является ли ошибка сетевой
 func IsConnectionError(err error) bool {
 	if err == nil {
 		return false
 	}
 
-	// Проверяем стандартные сетевые ошибки
 	switch {
 	case errors.Is(err, io.EOF):
 		return true
@@ -48,19 +85,16 @@ func IsConnectionError(err error) bool {
 		return true
 	}
 
-	// Проверяем net.Error
 	var netErr net.Error
 	if errors.As(err, &netErr) {
 		return true
 	}
 
-	// Проверяем DNS ошибки
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) {
 		return true
 	}
 
-	// Проверяем ошибки HTTP
 	switch {
 	case errors.Is(err, http.ErrHandlerTimeout):
 		return true
@@ -70,7 +104,6 @@ func IsConnectionError(err error) bool {
 		return true
 	}
 
-	// Проверяем строковые представления
 	errorStr := err.Error()
 	switch {
 	case strings.Contains(errorStr, "connection refused"):
@@ -103,15 +136,24 @@ func isConnectionPostgresError(pgErr *pgconn.PgError) bool {
 	if len(pgErr.Code) >= 2 && pgErr.Code[:2] == "08" {
 		return true
 	}
-
 	switch pgErr.Code {
+	// Класс 08 - Ошибки соединения
 	case pgerrcode.ConnectionException,
 		pgerrcode.ConnectionDoesNotExist,
 		pgerrcode.ConnectionFailure:
 		return true
-	default:
-		return false
+
+	// Класс 40 - Откат транзакции
+	case pgerrcode.TransactionRollback, // 40000
+		pgerrcode.SerializationFailure, // 40001
+		pgerrcode.DeadlockDetected:     // 40P01
+		return true
+
+	// Класс 57 - Ошибка оператора
+	case pgerrcode.CannotConnectNow: // 57P03
+		return true
 	}
+	return false
 }
 
 // возвращает интервал для конкретной попытки
@@ -122,7 +164,7 @@ func getBackoffForAttempt(backoffs []time.Duration, attempt int) time.Duration {
 	return backoffs[attempt]
 }
 
-// приостанавливает выполнение ф-ии с учетом контекста
+// приостанавливает выполнение с учетом контекста
 func sleepWithContext(ctx context.Context, duration time.Duration) error {
 	timer := time.NewTimer(duration)
 	defer timer.Stop()
@@ -135,96 +177,58 @@ func sleepWithContext(ctx context.Context, duration time.Duration) error {
 	}
 }
 
-// универсальный тип для ф-ии с параметрами
+// универсальные типы функций для retry
 type RetryableFunc[T any] func(ctx context.Context, args T) error
-
-// Для функций без контекста
 type RetryableFuncNoCtx[T any] func(args T) error
 
-// универсальный вызов повторных попыток
-func RetrySendWithArgs[T any](ctx context.Context, funcName string, function RetryableFunc[T], args T) error {
+// выполняет функцию с повторными попытками согласно стратегии
+func RetryWithStrategy[T any](ctx context.Context, name string, strategy RetryStrategy, function RetryableFunc[T], args T) error {
 	var lastErr error
-	var nameFlag bool  // false - agent, true - postgres
-	var checkFlag bool // какое условие используем, для агента и для postgres - разные
+	max := strategy.MaxAttempts()
 
-	retryConfig := DefaultRetryConfig()
-	attempt := 0
-
-	// проверяем какие условия для retry проверять далее
-	// так как функция универсальная
-	agentNames := []string{"SendBatch"}
-	postgresNames := []string{"UpdateGauge", "UpdateCounter", "getGauge", "getCounter", "getAllGauges", "getAllCounters"}
-
-	for _, name := range agentNames {
-		if name == funcName {
-			nameFlag = false
-		}
-	}
-
-	for _, name := range postgresNames {
-		if name == funcName {
-			nameFlag = true
-		}
-	}
-
-	for attempt < retryConfig.MaxAttempts {
+	for attempt := 0; attempt < max; attempt++ {
 		select {
 		case <-ctx.Done():
-			log.Printf("%s: func canceled by context", funcName)
+			log.Printf("%s: canceled by context", name)
 			return ctx.Err()
 		default:
 		}
 
-		// получаем результат исполнения ф-ии
 		err := function(ctx, args)
-
-		// если завершилась успешно
 		if err == nil {
 			if attempt > 0 {
-				log.Printf("%s: func successed after %d retries", funcName, attempt)
+				log.Printf("%s: succeeded after %d retries", name, attempt)
 			}
 			return nil
 		}
 
 		lastErr = err
 
-		// делаем ветвление логики для проверки типа ошибки для агента и для работы с БД
-		if nameFlag {
-			if pgErr, ok := err.(*pgconn.PgError); ok {
-				checkFlag = isConnectionPostgresError(pgErr)
-			}
-		} else {
-			checkFlag = IsConnectionError(err)
+		// нет смысла ждать, если следующей попытки не будет
+		if attempt+1 >= max || !strategy.ShouldRetry(err) {
+			break
 		}
 
-		// если агент - сетевая ошибка И это не последняя попытка
-		// если postgres - ошибка транспорта И это не последняя попытка
-		if checkFlag && attempt < retryConfig.MaxAttempts {
-
-			attempt++
-
-			// получаем интервал ожидания для текущей попытки
-			backoff := getBackoffForAttempt(retryConfig.Backoffs, attempt-1)
-
-			log.Printf("%s: func attempt [%d/%d] failed, retry in %v: %v",
-				funcName, attempt, retryConfig.MaxAttempts, backoff, err)
-
-			// ждем следующую попытку
-			if err := sleepWithContext(ctx, backoff); err != nil {
-				return err
-			}
-		} else {
-			break
+		backoff := strategy.Backoff(attempt)
+		log.Printf("%s: attempt [%d/%d] failed, retry in %v: %v", name, attempt+1, max, backoff, err)
+		if err := sleepWithContext(ctx, backoff); err != nil {
+			return err
 		}
 	}
 
-	return fmt.Errorf("%s: func failed after %d retries: %w", funcName, retryConfig.MaxAttempts, lastErr)
+	return fmt.Errorf("%s: failed after %d retries: %w", name, max, lastErr)
 }
 
-// Упрощенный вызов retry без контекста
-func RetrySendWithArgsNoCtx[T any](funcName string, function RetryableFuncNoCtx[T], args T) error {
-	// Используем background context
-	return RetrySendWithArgs(context.Background(), funcName, func(ctx context.Context, args T) error {
-		return function(args)
-	}, args)
+// RetryNoCtxWithStrategy – версия без контекста
+func RetryNoCtxWithStrategy[T any](name string, strategy RetryStrategy, function RetryableFuncNoCtx[T], args T) error {
+	return RetryWithStrategy(context.Background(), name, strategy, func(ctx context.Context, a T) error { return function(a) }, args)
+}
+
+// Удобные обертки со стратегиями по умолчанию
+func RetryPostgres[T any](ctx context.Context, name string, function RetryableFunc[T], args T) error {
+	return RetryWithStrategy(ctx, name, NewPostgresRetryStrategy(DefaultRetryConfig()), function, args)
+}
+
+func RetryNetworkNoCtx[T any](name string, function RetryableFuncNoCtx[T], args T) error {
+	return RetryNoCtxWithStrategy(name, NewNetworkRetryStrategy(DefaultRetryConfig()), function, args)
 }

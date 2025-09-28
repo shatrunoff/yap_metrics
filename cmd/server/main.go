@@ -16,12 +16,8 @@ import (
 	"github.com/shatrunoff/yap_metrics/internal/storage"
 )
 
-func main() {
-	cfg := config.ParseServerConfig()
-
-	log.Printf("Starting server with config: Address=%s, StoreInterval=%v, FileStoragePath=%s, Restore=%v, DatabaseDSN=%v",
-		cfg.ServerURL, cfg.StoreInterval, cfg.FileStoragePath, cfg.Restore, cfg.DatabaseDSN != "")
-
+// initServer собирает все зависимости и возвращает http.Server и функцию очистки ресурсов
+func initServer(cfg *config.ServerConfig) (*http.Server, func(), error) {
 	// Конфигурация хранилища
 	storageConfig := &storage.Config{
 		DatabaseDSN:     cfg.DatabaseDSN,
@@ -29,27 +25,24 @@ func main() {
 		Restore:         cfg.Restore,
 	}
 
-	// Создаем хранилище с приоритетом:
-	// PostgreSQL -> файл -> память
+	// Создаем хранилище (PostgreSQL -> файл -> память)
 	storageInstance, err := storage.NewStorage(storageConfig)
 	if err != nil {
-		log.Fatalf("Failed to initialize storage: %v", err)
+		return nil, nil, err
 	}
-	defer storageInstance.Close()
 
+	// Настраиваем файловый сервис при необходимости
 	var fileService *service.FileStorageService
 
-	// Для файлового хранилища создаем файловый сервис
 	if cfg.DatabaseDSN == "" && cfg.FileStoragePath != "" {
-		// Проверяем, поддерживает ли хранилище файловые операции
 		if fileSaver, ok := storageInstance.(interface {
 			SaveToFile(path string) error
 			LoadFromFile(filename string) error
 		}); ok {
 			fileService = service.NewFileStorageService(fileSaver, cfg.FileStoragePath, cfg.StoreInterval)
 			fileService.Start()
-			defer fileService.Stop()
 
+			// Логируем ошибки файлового сервиса в фоне
 			go func() {
 				for err := range fileService.Err() {
 					log.Printf("File storage error: %v", err)
@@ -64,15 +57,37 @@ func main() {
 		fileService = service.NewFileStorageService(nil, "", 0)
 	}
 
-	// Определяем, нужно ли синхронное сохранение (только для файлового хранилища)
+	// Определяем необходимость синхронного сохранения (только для файлового хранилища)
 	syncSave := cfg.StoreInterval == 0 && cfg.DatabaseDSN == ""
 
+	// Сборка HTTP-хендлера и сервера
 	serverHandler := handler.NewHandler(storageInstance, fileService, syncSave)
+	server := &http.Server{Addr: cfg.ServerURL, Handler: serverHandler}
 
-	server := &http.Server{
-		Addr:    cfg.ServerURL,
-		Handler: serverHandler,
+	// Функция очистки
+	cleanup := func() {
+		if fileService != nil {
+			fileService.Stop()
+		}
+		if err := storageInstance.Close(); err != nil {
+			log.Printf("Storage close error: %v", err)
+		}
 	}
+
+	return server, cleanup, nil
+}
+
+func main() {
+	cfg := config.ParseServerConfig()
+
+	log.Printf("Starting server with config: Address=%s, StoreInterval=%v, FileStoragePath=%s, Restore=%v, DatabaseDSN=%v",
+		cfg.ServerURL, cfg.StoreInterval, cfg.FileStoragePath, cfg.Restore, cfg.DatabaseDSN != "")
+
+	server, cleanup, err := initServer(cfg)
+	if err != nil {
+		log.Fatalf("Failed to initialize server: %v", err)
+	}
+	defer cleanup()
 
 	// Канал для сигнала о готовности сервера
 	ready := make(chan bool, 1)

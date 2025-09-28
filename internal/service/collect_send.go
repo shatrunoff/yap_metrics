@@ -18,6 +18,11 @@ type AgentService struct {
 	wg        sync.WaitGroup
 }
 
+// Константы по умолчанию для сервиса агента
+const (
+	defaultBufferSize = 10
+)
+
 func NewAgent(cfg *config.AgentConfig) *AgentService {
 	return &AgentService{
 		collector: agent.NewMetricsCollector(),
@@ -49,7 +54,7 @@ func (as *AgentService) startSender() {
 
 	// Буфер для накопления метрик
 	var metricsBuffer []model.Metrics
-	bufferSize := 10
+	bufferSize := defaultBufferSize
 
 	for {
 		select {

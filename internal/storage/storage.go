@@ -6,14 +6,29 @@ import (
 	"github.com/shatrunoff/yap_metrics/internal/model"
 )
 
-// Storage универсальный интерфейс для всех типов хранилищ
-type Storage interface {
-	Ping(ctx context.Context) error
+// Reader отвечает только за чтение метрик
+type Reader interface {
+	GetMetric(ctx context.Context, metricType, name string) (model.Metrics, error)
+	GetAll(ctx context.Context) (map[string]model.Metrics, error)
+}
+
+// Writer отвечает только за запись метрик
+type Writer interface {
 	UpdateGauge(ctx context.Context, name string, value float64) error
 	UpdateCounter(ctx context.Context, name string, delta int64) error
 	UpdateMetricsBatch(ctx context.Context, metrics []model.Metrics) error
-	GetMetric(ctx context.Context, metricType, name string) (model.Metrics, error)
-	GetAll(ctx context.Context) (map[string]model.Metrics, error)
+}
+
+// HealthChecker отвечает за проверку работоспособности
+type HealthChecker interface {
+	Ping(ctx context.Context) error
+}
+
+// Storage-композит сохраняем для удобства использования существующим кодом
+type Storage interface {
+	Reader
+	Writer
+	HealthChecker
 	Close() error
 }
 

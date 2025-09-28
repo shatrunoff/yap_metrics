@@ -57,7 +57,9 @@ func initTemplates() {
 }
 
 type Handler struct {
-	storage     storage.Storage
+	reader      storage.Reader
+	writer      storage.Writer
+	health      storage.HealthChecker
 	fileService *service.FileStorageService
 	syncSave    bool
 	logger      *zap.Logger
@@ -72,7 +74,7 @@ func (h *Handler) pingDB(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	if err := h.storage.Ping(ctx); err != nil {
+	if err := h.health.Ping(ctx); err != nil {
 		h.logger.Error("DB ping failed", zap.Error(err))
 		http.Error(w, "DB connection failed", http.StatusInternalServerError)
 		return
@@ -97,7 +99,7 @@ func (h *Handler) updateMetric(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "ERROR: invalid Gauge metric", http.StatusBadRequest)
 			return
 		}
-		if err := h.storage.UpdateGauge(ctx, metricName, value); err != nil {
+		if err := h.writer.UpdateGauge(ctx, metricName, value); err != nil {
 			h.logger.Error("Failed to update gauge", zap.Error(err))
 			http.Error(w, "ERROR: failed to update gauge", http.StatusInternalServerError)
 			return
@@ -109,7 +111,7 @@ func (h *Handler) updateMetric(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "ERROR: invalid Counter metric", http.StatusBadRequest)
 			return
 		}
-		if err := h.storage.UpdateCounter(ctx, metricName, delta); err != nil {
+		if err := h.writer.UpdateCounter(ctx, metricName, delta); err != nil {
 			h.logger.Error("Failed to update counter", zap.Error(err))
 			http.Error(w, "ERROR: failed to update counter", http.StatusInternalServerError)
 			return
@@ -139,7 +141,7 @@ func (h *Handler) getMetric(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	metric, err := h.storage.GetMetric(ctx, metricType, metricName)
+	metric, err := h.reader.GetMetric(ctx, metricType, metricName)
 	if err != nil {
 		h.logger.Warn("Metric not found", zap.String("type", metricType), zap.String("name", metricName), zap.Error(err))
 		http.NotFound(w, r)
@@ -160,7 +162,7 @@ func (h *Handler) getMetric(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listMetrics(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	metrics, err := h.storage.GetAll(ctx)
+	metrics, err := h.reader.GetAll(ctx)
 	if err != nil {
 		h.logger.Error("Failed to get all metrics", zap.Error(err))
 		http.Error(w, "ERROR: failed to retrieve metrics", http.StatusInternalServerError)
@@ -207,7 +209,7 @@ func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "ERROR: value is required for gauge", http.StatusBadRequest)
 			return
 		}
-		if err := h.storage.UpdateGauge(ctx, metric.ID, *metric.Value); err != nil {
+		if err := h.writer.UpdateGauge(ctx, metric.ID, *metric.Value); err != nil {
 			h.logger.Error("Failed to update gauge via JSON", zap.Error(err))
 			http.Error(w, "ERROR: failed to update gauge", http.StatusInternalServerError)
 			return
@@ -218,7 +220,7 @@ func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "ERROR: delta is required for counter", http.StatusBadRequest)
 			return
 		}
-		if err := h.storage.UpdateCounter(ctx, metric.ID, *metric.Delta); err != nil {
+		if err := h.writer.UpdateCounter(ctx, metric.ID, *metric.Delta); err != nil {
 			h.logger.Error("Failed to update counter via JSON", zap.Error(err))
 			http.Error(w, "ERROR: failed to update counter", http.StatusInternalServerError)
 			return
@@ -239,7 +241,7 @@ func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Возвращаем обновленную метрику
-	updatedMetric, err := h.storage.GetMetric(ctx, metric.MType, metric.ID)
+	updatedMetric, err := h.reader.GetMetric(ctx, metric.MType, metric.ID)
 	if err != nil {
 		h.logger.Error("Failed to get updated metric", zap.Error(err))
 		http.Error(w, "ERROR: failed to get updated metric", http.StatusInternalServerError)
@@ -277,7 +279,7 @@ func (h *Handler) getMetricJSON(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	foundMetric, err := h.storage.GetMetric(ctx, metric.MType, metric.ID)
+	foundMetric, err := h.reader.GetMetric(ctx, metric.MType, metric.ID)
 	if err != nil {
 		h.logger.Warn("Metric not found via JSON", zap.String("type", metric.MType), zap.String("id", metric.ID), zap.Error(err))
 		http.NotFound(w, r)
@@ -314,51 +316,11 @@ func (h *Handler) updateMetricsBatch(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// Используем batch, если хранилище поддерживает
-	if batchStorage, ok := h.storage.(interface {
-		UpdateMetricsBatch(ctx context.Context, metrics []model.Metrics) error
-	}); ok {
-		// batch метод
-		if err := batchStorage.UpdateMetricsBatch(ctx, metrics); err != nil {
-			h.logger.Error("Failed to update metrics batch", zap.Error(err))
-			http.Error(w, "ERROR: failed to update metrics batch", http.StatusInternalServerError)
-			return
-		}
-	} else {
-		// обрабатываем по одной метрике
-		var hasErrors bool
-		for _, metric := range metrics {
-			if metric.ID == "" {
-				continue
-			}
-
-			var err error
-			switch metric.MType {
-			case model.Gauge:
-				if metric.Value != nil {
-					err = h.storage.UpdateGauge(ctx, metric.ID, *metric.Value)
-				}
-
-			case model.Counter:
-				if metric.Delta != nil {
-					err = h.storage.UpdateCounter(ctx, metric.ID, *metric.Delta)
-				}
-			}
-
-			// обработка остальных метрик и логируем ошибку
-			if err != nil {
-				h.logger.Error("Failed to update metric in batch",
-					zap.String("id", metric.ID),
-					zap.String("type", metric.MType),
-					zap.Error(err))
-				hasErrors = true
-			}
-		}
-
-		if hasErrors {
-			http.Error(w, "ERROR: some metrics failed to update", http.StatusInternalServerError)
-			return
-		}
+	// Пишем батч через Writer
+	if err := h.writer.UpdateMetricsBatch(ctx, metrics); err != nil {
+		h.logger.Error("Failed to update metrics batch", zap.Error(err))
+		http.Error(w, "ERROR: failed to update metrics batch", http.StatusInternalServerError)
+		return
 	}
 
 	// Синхронное сохранение только для файлового хранилища
@@ -374,7 +336,7 @@ func (h *Handler) updateMetricsBatch(w http.ResponseWriter, r *http.Request) {
 }
 
 // основной хэндлер
-func NewHandler(storage storage.Storage, fileService *service.FileStorageService, syncSave bool) http.Handler {
+func NewHandler(st storage.Storage, fileService *service.FileStorageService, syncSave bool) http.Handler {
 	// Инициализируем логгер
 	err := middleware.InitLogger()
 	if err != nil {
@@ -386,7 +348,9 @@ func NewHandler(storage storage.Storage, fileService *service.FileStorageService
 	sugar := middleware.GetSugar()
 
 	handler := &Handler{
-		storage:     storage,
+		reader:      st,
+		writer:      st,
+		health:      st,
 		fileService: fileService,
 		syncSave:    syncSave,
 		logger:      logger,
@@ -394,7 +358,7 @@ func NewHandler(storage storage.Storage, fileService *service.FileStorageService
 	}
 
 	// Проверяем, поддерживает ли хранилище файловые операции
-	if fileSaver, ok := storage.(interface {
+	if fileSaver, ok := st.(interface {
 		SaveToFile(path string) error
 		LoadFromFile(filename string) error
 	}); ok {

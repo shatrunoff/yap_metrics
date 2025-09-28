@@ -161,7 +161,7 @@ func (s *Sender) Send(metrics map[string]model.Metrics) error {
 
 // обертка с retry для SendBatch
 func (s *Sender) SendBatchWithRetry(metrics []model.Metrics) error {
-	return utils.RetrySendWithArgsNoCtx("SendBatch", func(metrics []model.Metrics) error {
+	return utils.RetryNetworkNoCtx("SendBatch", func(metrics []model.Metrics) error {
 		return s.SendBatch(metrics)
 	}, metrics)
 }
