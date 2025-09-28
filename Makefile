@@ -1,7 +1,10 @@
 build:
 	go build -o ./cmd/agent ./cmd/agent
 	go build -o ./cmd/server ./cmd/server
-
+libs:
+	go mod tidy
+	go mod vendor
 test:
-	./metricstest-darwin-arm64
-
+	make libs
+	make build
+	sh test.sh

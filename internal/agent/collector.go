@@ -92,7 +92,7 @@ func (mc *MetricsCollector) Collect() {
 		"StackSys":      float64(memStats.StackSys),
 		"Sys":           float64(memStats.Sys),
 		"TotalAlloc":    float64(memStats.TotalAlloc),
-		"RandomValue":   randomValue, // Добавляем случайное значение
+		"RandomValue":   randomValue,
 	}
 
 	// Обновляем метрики gauge в цикле

@@ -1,64 +1,133 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/shatrunoff/yap_metrics/internal/config"
 	"github.com/shatrunoff/yap_metrics/internal/handler"
 	"github.com/shatrunoff/yap_metrics/internal/service"
 	"github.com/shatrunoff/yap_metrics/internal/storage"
 )
 
+// initServer собирает все зависимости и возвращает http.Server и функцию очистки ресурсов
+func initServer(cfg *config.ServerConfig) (*http.Server, func(), error) {
+	// Конфигурация хранилища
+	storageConfig := &storage.Config{
+		DatabaseDSN:     cfg.DatabaseDSN,
+		FileStoragePath: cfg.FileStoragePath,
+		Restore:         cfg.Restore,
+	}
+
+	// Создаем хранилище (PostgreSQL -> файл -> память)
+	storageInstance, err := storage.NewStorage(storageConfig)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Настраиваем файловый сервис при необходимости
+	var fileService *service.FileStorageService
+
+	if cfg.DatabaseDSN == "" && cfg.FileStoragePath != "" {
+		if fileSaver, ok := storageInstance.(interface {
+			SaveToFile(path string) error
+			LoadFromFile(filename string) error
+		}); ok {
+			fileService = service.NewFileStorageService(fileSaver, cfg.FileStoragePath, cfg.StoreInterval)
+			fileService.Start()
+
+			// Логируем ошибки файлового сервиса в фоне
+			go func() {
+				for err := range fileService.Err() {
+					log.Printf("File storage error: %v", err)
+				}
+			}()
+		} else {
+			log.Printf("WARNING: Storage doesn't support file operations, using in-memory only")
+			fileService = service.NewFileStorageService(nil, "", 0)
+		}
+	} else {
+		// Для PostgreSQL или чистого in-memory создаем пустой файловый сервис
+		fileService = service.NewFileStorageService(nil, "", 0)
+	}
+
+	// Определяем необходимость синхронного сохранения (только для файлового хранилища)
+	syncSave := cfg.StoreInterval == 0 && cfg.DatabaseDSN == ""
+
+	// Сборка HTTP-хендлера и сервера
+	serverHandler := handler.NewHandler(storageInstance, fileService, syncSave)
+	server := &http.Server{Addr: cfg.ServerURL, Handler: serverHandler}
+
+	// Функция очистки
+	cleanup := func() {
+		if fileService != nil {
+			fileService.Stop()
+		}
+		if err := storageInstance.Close(); err != nil {
+			log.Printf("Storage close error: %v", err)
+		}
+	}
+
+	return server, cleanup, nil
+}
+
 func main() {
 	cfg := config.ParseServerConfig()
-	memStorage := storage.NewMemStorage()
 
-	// Загрузка метрик при старте
-	if cfg.Restore {
-		if err := memStorage.LoadFromFile(cfg.FileStoragePath); err != nil {
-			log.Printf("WARNING: failed to load metrics from file: %v", err)
+	log.Printf("Starting server with config: Address=%s, StoreInterval=%v, FileStoragePath=%s, Restore=%v, DatabaseDSN=%v",
+		cfg.ServerURL, cfg.StoreInterval, cfg.FileStoragePath, cfg.Restore, cfg.DatabaseDSN != "")
+
+	server, cleanup, err := initServer(cfg)
+	if err != nil {
+		log.Fatalf("Failed to initialize server: %v", err)
+	}
+	defer cleanup()
+
+	// Канал для сигнала о готовности сервера
+	ready := make(chan bool, 1)
+
+	go func() {
+		log.Printf("Server starting on %s", server.Addr)
+
+		// Логируем тип используемого хранилища
+		if cfg.DatabaseDSN != "" {
+			log.Printf("Using PostgreSQL storage")
+		} else if cfg.FileStoragePath != "" {
+			log.Printf("Using file storage: %s", cfg.FileStoragePath)
 		} else {
-			log.Printf("Metrics loaded from %s", cfg.FileStoragePath)
+			log.Printf("Using in-memory storage")
 		}
-	}
 
-	// Создаем сервис для сохранения метрик
-	fileService := service.NewFileStorageService(memStorage, cfg.FileStoragePath, cfg.StoreInterval)
+		ready <- true
 
-	// Запускаем периодическое сохранение (если интервал не 0)
-	fileService.Start()
-	defer fileService.Stop()
-
-	go func() {
-		for err := range fileService.Err() {
-			log.Printf("File storage error: %v", err)
-		}
-	}()
-
-	// Создаем хэндлер с поддержкой синхронного сохранения
-	serverHandler := handler.NewHandler(memStorage, fileService, cfg.StoreInterval == 0)
-
-	server := &http.Server{
-		Addr:    cfg.ServerURL,
-		Handler: serverHandler,
-	}
-
-	go func() {
-		log.Printf("Server started on %s", server.Addr)
-		log.Printf("Store interval: %v, File path: %s, Restore: %v",
-			cfg.StoreInterval, cfg.FileStoragePath, cfg.Restore)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server error: %v", err)
 		}
 	}()
 
+	// Ждем запуска сервера
+	<-ready
+	log.Printf("Server started successfully")
+
 	stopChan := make(chan os.Signal, 1)
 	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
 	<-stopChan
 
-	log.Printf("Server stopped on %s", server.Addr)
+	log.Printf("Shutting down server...")
+
+	// Graceful shutdown
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Printf("Server shutdown error: %v", err)
+	}
+
+	log.Printf("Server stopped")
 }
