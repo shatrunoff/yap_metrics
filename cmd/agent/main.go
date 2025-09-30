@@ -16,18 +16,23 @@ import (
 func parseAgentConfig() *config.AgentConfig {
 	var pollSec int
 	var repSec int
+	var key string
 
 	// получаем конфиг по умолчанию
 	cfg := config.DefaultAgentConfig()
 
 	// парсим аргументы командной строки
-	flag.StringVar(&cfg.ServerURL, "a", cfg.ServerURL, "Server address host:port")
+	flag.StringVar(&cfg.ServerURL, "a", cfg.ServerURL, "Server address host: ")
 	flag.IntVar(&pollSec, "p", int(cfg.PollInterval.Seconds()), "PollInterval (s)")
 	flag.IntVar(&repSec, "r", int(cfg.ReportInterval.Seconds()), "ReportInterval (s)")
+	flag.StringVar(&key, "k", cfg.Key, "Signing key for HashSHA256 header")
 	flag.Parse()
 
 	cfg.PollInterval = time.Duration(pollSec) * time.Second
 	cfg.ReportInterval = time.Duration(repSec) * time.Second
+	if key != "" {
+		cfg.Key = key
+	}
 
 	if flag.NArg() > 0 {
 		log.Fatalf("ERROR: unknown arguments: %v", flag.Args())
@@ -37,6 +42,10 @@ func parseAgentConfig() *config.AgentConfig {
 	// ADDRESS
 	if envAddr := os.Getenv("ADDRESS"); envAddr != "" {
 		cfg.ServerURL = envAddr
+	}
+	// KEY
+	if envKey := os.Getenv("KEY"); envKey != "" {
+		cfg.Key = envKey
 	}
 	// REPORT_INTERVAL
 	if envReportInterval := os.Getenv("REPORT_INTERVAL"); envReportInterval != "" {

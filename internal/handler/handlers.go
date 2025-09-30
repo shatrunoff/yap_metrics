@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"text/template"
 	"time"
@@ -182,8 +183,10 @@ func (h *Handler) listMetrics(w http.ResponseWriter, r *http.Request) {
 
 // хэндлер обновления метрики через JSON
 func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("Content-Type") != "application/json" {
-		http.Error(w, "ERROR: Content-Type must be application/json", http.StatusBadRequest)
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Content-Type must be application/json"})
 		return
 	}
 
@@ -192,12 +195,16 @@ func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&metric); err != nil {
 		h.logger.Error("Failed to decode JSON", zap.Error(err))
-		http.Error(w, "ERROR: invalid JSON", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid JSON"})
 		return
 	}
 
 	if metric.ID == "" {
-		http.Error(w, "ERROR: metric ID is required", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "metric ID is required"})
 		return
 	}
 
@@ -206,28 +213,38 @@ func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
 	switch metric.MType {
 	case model.Gauge:
 		if metric.Value == nil {
-			http.Error(w, "ERROR: value is required for gauge", http.StatusBadRequest)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "value is required for gauge"})
 			return
 		}
 		if err := h.writer.UpdateGauge(ctx, metric.ID, *metric.Value); err != nil {
 			h.logger.Error("Failed to update gauge via JSON", zap.Error(err))
-			http.Error(w, "ERROR: failed to update gauge", http.StatusInternalServerError)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to update gauge"})
 			return
 		}
 
 	case model.Counter:
 		if metric.Delta == nil {
-			http.Error(w, "ERROR: delta is required for counter", http.StatusBadRequest)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "delta is required for counter"})
 			return
 		}
 		if err := h.writer.UpdateCounter(ctx, metric.ID, *metric.Delta); err != nil {
 			h.logger.Error("Failed to update counter via JSON", zap.Error(err))
-			http.Error(w, "ERROR: failed to update counter", http.StatusInternalServerError)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to update counter"})
 			return
 		}
 
 	default:
-		http.Error(w, "ERROR: unknown metric type", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "unknown metric type"})
 		return
 	}
 
@@ -244,7 +261,9 @@ func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
 	updatedMetric, err := h.reader.GetMetric(ctx, metric.MType, metric.ID)
 	if err != nil {
 		h.logger.Error("Failed to get updated metric", zap.Error(err))
-		http.Error(w, "ERROR: failed to get updated metric", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to get updated metric"})
 		return
 	}
 
@@ -252,14 +271,17 @@ func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(updatedMetric); err != nil {
 		h.logger.Error("Failed to encode JSON response", zap.Error(err))
-		http.Error(w, "ERROR: failed to encode response", http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to encode response"})
 	}
 }
 
 // хэндлер получения метрики через JSON
 func (h *Handler) getMetricJSON(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("Content-Type") != "application/json" {
-		http.Error(w, "ERROR: Content-Type must be application/json", http.StatusBadRequest)
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Content-Type must be application/json"})
 		return
 	}
 
@@ -268,12 +290,16 @@ func (h *Handler) getMetricJSON(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&metric); err != nil {
 		h.logger.Error("Failed to decode JSON", zap.Error(err))
-		http.Error(w, "ERROR: invalid JSON", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid JSON"})
 		return
 	}
 
 	if metric.ID == "" || metric.MType == "" {
-		http.Error(w, "ERROR: metric ID and type are required", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "metric ID and type are required"})
 		return
 	}
 
@@ -282,21 +308,26 @@ func (h *Handler) getMetricJSON(w http.ResponseWriter, r *http.Request) {
 	foundMetric, err := h.reader.GetMetric(ctx, metric.MType, metric.ID)
 	if err != nil {
 		h.logger.Warn("Metric not found via JSON", zap.String("type", metric.MType), zap.String("id", metric.ID), zap.Error(err))
-		http.NotFound(w, r)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "metric not found"})
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(foundMetric); err != nil {
 		h.logger.Error("Failed to encode JSON response", zap.Error(err))
-		http.Error(w, "ERROR: failed to encode response", http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to encode response"})
 	}
 }
 
 // хэндлер обновления метрик батчами
 func (h *Handler) updateMetricsBatch(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("Content-Type") != "application/json" {
-		http.Error(w, "ERROR: Content-Type must be application/json", http.StatusBadRequest)
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Content-Type must be application/json"})
 		return
 	}
 
@@ -336,7 +367,7 @@ func (h *Handler) updateMetricsBatch(w http.ResponseWriter, r *http.Request) {
 }
 
 // основной хэндлер
-func NewHandler(st storage.Storage, fileService *service.FileStorageService, syncSave bool) http.Handler {
+func NewHandler(st storage.Storage, fileService *service.FileStorageService, syncSave bool, key string) http.Handler {
 	// Инициализируем логгер
 	err := middleware.InitLogger()
 	if err != nil {
@@ -369,6 +400,7 @@ func NewHandler(st storage.Storage, fileService *service.FileStorageService, syn
 
 	// Middleware
 	router.Use(middleware.GzipDecompressionMiddleware)
+	router.Use(middleware.SignatureMiddleware(key))
 	router.Use(middleware.LoggingMiddleware)
 	router.Use(middleware.GzipCompressionMiddleware)
 

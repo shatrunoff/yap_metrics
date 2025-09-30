@@ -20,11 +20,13 @@ import (
 type Sender struct {
 	ServerURL string
 	Client    *http.Client
+	Key       string
 }
 
-func NewSender(ServerURL string) *Sender {
+func NewSender(ServerURL string, key string) *Sender {
 	return &Sender{
 		ServerURL: ServerURL,
+		Key:       key,
 		Client: &http.Client{
 			Timeout: 4 * time.Second,
 		},
@@ -88,6 +90,12 @@ func (s *Sender) SendJSON(metrics map[string]model.Metrics) error {
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("Content-Encoding", "gzip")
 		request.Header.Set("Accept-Encoding", "gzip")
+
+		// Подпись тела запроса, если задан ключ
+		if s.Key != "" {
+			sig := utils.ComputeHMACSHA256(jsonData, s.Key)
+			request.Header.Set("HashSHA256", sig)
+		}
 
 		// Отправляем
 		response, err := s.Client.Do(request)
@@ -206,6 +214,12 @@ func (s *Sender) SendBatch(metrics []model.Metrics) error {
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Content-Encoding", "gzip")
 	request.Header.Set("Accept-Encoding", "gzip")
+
+	// Подпись тела запроса, если задан ключ
+	if s.Key != "" {
+		sig := utils.ComputeHMACSHA256(jsonData, s.Key)
+		request.Header.Set("HashSHA256", sig)
+	}
 
 	// Отправляем
 	response, err := s.Client.Do(request)

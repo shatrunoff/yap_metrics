@@ -20,13 +20,14 @@ type AgentService struct {
 
 // Константы по умолчанию для сервиса агента
 const (
+	// сколько метрик накапливается прежде чем отправлять батч
 	defaultBufferSize = 10
 )
 
 func NewAgent(cfg *config.AgentConfig) *AgentService {
 	return &AgentService{
 		collector: agent.NewMetricsCollector(),
-		sender:    agent.NewSender(cfg.ServerURL),
+		sender:    agent.NewSender(cfg.ServerURL, cfg.Key),
 		config:    cfg,
 		doneChan:  make(chan struct{}),
 	}
