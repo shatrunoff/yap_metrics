@@ -7,6 +7,7 @@ type AgentConfig struct {
 	ReportInterval time.Duration
 	ServerURL      string
 	Key            string
+	RateLimit      int
 }
 
 func DefaultAgentConfig() *AgentConfig {
@@ -15,5 +16,6 @@ func DefaultAgentConfig() *AgentConfig {
 		ReportInterval: 10 * time.Second,
 		ServerURL:      "localhost:8080",
 		Key:            "",
+		RateLimit:      0,
 	}
 }

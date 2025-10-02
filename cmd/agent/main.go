@@ -17,6 +17,7 @@ func parseAgentConfig() *config.AgentConfig {
 	var pollSec int
 	var repSec int
 	var key string
+	var rateLimit int
 
 	// получаем конфиг по умолчанию
 	cfg := config.DefaultAgentConfig()
@@ -26,12 +27,16 @@ func parseAgentConfig() *config.AgentConfig {
 	flag.IntVar(&pollSec, "p", int(cfg.PollInterval.Seconds()), "PollInterval (s)")
 	flag.IntVar(&repSec, "r", int(cfg.ReportInterval.Seconds()), "ReportInterval (s)")
 	flag.StringVar(&key, "k", cfg.Key, "Signing key for HashSHA256 header")
+	flag.IntVar(&rateLimit, "l", cfg.RateLimit, "Max concurrent outgoing requests")
 	flag.Parse()
 
 	cfg.PollInterval = time.Duration(pollSec) * time.Second
 	cfg.ReportInterval = time.Duration(repSec) * time.Second
 	if key != "" {
 		cfg.Key = key
+	}
+	if rateLimit > 0 {
+		cfg.RateLimit = rateLimit
 	}
 
 	if flag.NArg() > 0 {
@@ -57,6 +62,12 @@ func parseAgentConfig() *config.AgentConfig {
 	if envPoolInterval := os.Getenv("POLL_INTERVAL"); envPoolInterval != "" {
 		if sec, err := strconv.Atoi(envPoolInterval); err == nil {
 			cfg.PollInterval = time.Duration(sec) * time.Second
+		}
+	}
+	// RATE_LIMIT
+	if envRateLimit := os.Getenv("RATE_LIMIT"); envRateLimit != "" {
+		if rl, err := strconv.Atoi(envRateLimit); err == nil && rl > 0 {
+			cfg.RateLimit = rl
 		}
 	}
 

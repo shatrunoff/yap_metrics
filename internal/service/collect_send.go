@@ -16,13 +16,9 @@ type AgentService struct {
 	config    *config.AgentConfig
 	doneChan  chan struct{}
 	wg        sync.WaitGroup
+	jobs      chan model.Metrics
+	workersWG sync.WaitGroup
 }
-
-// Константы по умолчанию для сервиса агента
-const (
-	// сколько метрик накапливается прежде чем отправлять батч
-	defaultBufferSize = 10
-)
 
 func NewAgent(cfg *config.AgentConfig) *AgentService {
 	return &AgentService{
@@ -30,6 +26,7 @@ func NewAgent(cfg *config.AgentConfig) *AgentService {
 		sender:    agent.NewSender(cfg.ServerURL, cfg.Key),
 		config:    cfg,
 		doneChan:  make(chan struct{}),
+		jobs:      make(chan model.Metrics, 256),
 	}
 }
 
@@ -48,50 +45,60 @@ func (as *AgentService) startCollector() {
 	}
 }
 
-// отправка метрик через JSON
+// запускает задачи отправки и собирает метрики, публикует задачи в пул
 func (as *AgentService) startSender() {
 	ticker := time.NewTicker(as.config.ReportInterval)
 	defer ticker.Stop()
 
-	// Буфер для накопления метрик
-	var metricsBuffer []model.Metrics
-	bufferSize := defaultBufferSize
-
 	for {
 		select {
 		case <-ticker.C:
-			// все метрики
 			allMetrics := as.collector.GetMetrics()
-
-			// map в slice
-			metricsSlice := make([]model.Metrics, 0, len(allMetrics))
-			for _, metric := range allMetrics {
-				metricsSlice = append(metricsSlice, metric)
-			}
-
-			// Добавляем в буфер
-			metricsBuffer = append(metricsBuffer, metricsSlice...)
-
-			// Если буфер достиг размера батча или больше, то отправляем
-			if len(metricsBuffer) >= bufferSize {
-				if err := as.sender.SendBatchWithRetry(metricsBuffer); err != nil {
-					log.Printf("FAIL to send metrics batch: %v", err)
-				} else {
-					log.Printf("Successfully sent batch of %d metrics", len(metricsBuffer))
+			for _, m := range allMetrics {
+				select {
+				case as.jobs <- m:
+				case <-as.doneChan:
+					close(as.jobs)
+					return
 				}
-				// Очищаем буфер после отправки
-				metricsBuffer = nil
 			}
-
 		case <-as.doneChan:
-			// При остановке отправляем оставшиеся метрики
-			if len(metricsBuffer) > 0 {
-				if err := as.sender.SendBatchWithRetry(metricsBuffer); err != nil {
-					log.Printf("FAIL to send final metrics batch: %v", err)
-				} else {
-					log.Printf("Successfully sent final batch of %d metrics", len(metricsBuffer))
+			// Закрываем очередь задач, чтобы завершить jobs
+			close(as.jobs)
+			return
+		}
+	}
+}
+
+// запуск воркеров с ограничением одновременно исходящих запросов
+func (as *AgentService) startWorkers() {
+	workers := as.config.RateLimit
+	if workers <= 0 {
+		workers = 1
+	}
+	as.workersWG.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer as.workersWG.Done()
+			for m := range as.jobs {
+				// отправляем по одной метрике, используя батч-метод
+				if err := as.sender.SendBatchWithRetry([]model.Metrics{m}); err != nil {
+					log.Printf("FAIL to send metric %s: %v", m.ID, err)
 				}
 			}
+		}()
+	}
+}
+
+// сбор системных метрик
+func (as *AgentService) startSysCollector() {
+	ticker := time.NewTicker(as.config.PollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			as.collector.CollectSys()
+		case <-as.doneChan:
 			return
 		}
 	}
@@ -100,16 +107,30 @@ func (as *AgentService) startSender() {
 func (as *AgentService) Stop() {
 	close(as.doneChan)
 	as.wg.Wait()
+	// дожидаемся завершения всех воркеров
+	as.workersWG.Wait()
 }
 
 func (as *AgentService) Run() {
-	// 2 горутины
-	as.wg.Add(2)
+	// 3 горутины:
+	// сбор runtime,
+	// сбор sys,
+	// отправитель
+	as.wg.Add(3)
+
+	// запуск воркеров отправки по лимиту
+	as.startWorkers()
 
 	// запуск сбора
 	go func() {
 		defer as.wg.Done()
 		as.startCollector()
+	}()
+
+	// запуск сбора системных метрик
+	go func() {
+		defer as.wg.Done()
+		as.startSysCollector()
 	}()
 
 	// запуск отправки

@@ -58,6 +58,60 @@ func compressData(data []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// отправляет одну метрику в формате JSON c gzip
+// и опциональной подписью HMAC
+func (s *Sender) SendMetricJSON(metric model.Metrics) error {
+	// Пропускаем метрики без значений
+	if (metric.MType == model.Gauge && metric.Value == nil) ||
+		(metric.MType == model.Counter && metric.Delta == nil) {
+		return nil
+	}
+
+	jsonData, err := json.Marshal(metric)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metric %s: %w", metric.ID, err)
+	}
+
+	compressedData, err := compressData(jsonData)
+	if err != nil {
+		return fmt.Errorf("failed to compress data for metric %s: %w", metric.ID, err)
+	}
+
+	url := "http://" + s.ServerURL + "/update/"
+	request, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(compressedData))
+	if err != nil {
+		return fmt.Errorf("FAILED to create request: %w", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Content-Encoding", "gzip")
+	request.Header.Set("Accept-Encoding", "gzip")
+
+	// Опциональная подпись тела запроса
+	if s.Key != "" {
+		sig := utils.ComputeHMACSHA256(jsonData, s.Key)
+		request.Header.Set("HashSHA256", sig)
+	}
+
+	response, err := s.Client.Do(request)
+	if err != nil {
+		return fmt.Errorf("FAILED to send metric %s: %w", metric.ID, err)
+	}
+	defer response.Body.Close()
+
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("FAIL status for %s: %d, body: %s", metric.ID, response.StatusCode, string(body))
+	}
+	return nil
+}
+
+// обёртка над SendMetricJSON с ретраями для сетевых ошибок
+func (s *Sender) SendMetricWithRetry(metric model.Metrics) error {
+	return utils.RetryNetworkNoCtx("SendMetric", func(m model.Metrics) error {
+		return s.SendMetricJSON(m)
+	}, metric)
+}
+
 // метод для отправки через JSON с поддержкой gzip
 func (s *Sender) SendJSON(metrics map[string]model.Metrics) error {
 	for _, metric := range metrics {
