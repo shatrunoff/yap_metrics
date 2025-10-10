@@ -11,11 +11,11 @@ import (
 func (mc *MetricsCollector) CollectSys() {
 	// Сначала собираем данные вне блокировок
 	var total, free float64
-	haveMem := false
+	hasMem := false
 	if vm, err := mem.VirtualMemory(); err == nil {
 		total = float64(vm.Total)
 		free = float64(vm.Free)
-		haveMem = true
+		hasMem = true
 	}
 
 	var percents []float64
@@ -24,7 +24,7 @@ func (mc *MetricsCollector) CollectSys() {
 	}
 
 	// обновляем коллекцию метрик (внутренние методы берут блокировку)
-	if haveMem {
+	if hasMem {
 		mc.updateGauge("TotalMemory", total)
 		mc.updateGauge("FreeMemory", free)
 	}

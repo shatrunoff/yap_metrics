@@ -20,13 +20,37 @@ type AgentService struct {
 	workersWG sync.WaitGroup
 }
 
+// Параметры буферизации отправки метрик по умолчанию
+const (
+	defaultBatchSize    = 10
+	defaultBatchTimeout = 100 * time.Millisecond
+)
+
+// calcJobsBufferSize рассчитывает размер буфера очереди задач отправки на основе
+// количества воркеров (RateLimit) и периода отчётности (ReportInterval)
+func calcJobsBufferSize(cfg *config.AgentConfig) int {
+	workers := cfg.RateLimit
+	if workers <= 0 {
+		workers = 1
+	}
+	cycles := int(cfg.ReportInterval / defaultBatchTimeout)
+	if cycles < 1 {
+		cycles = 1
+	}
+	cap := workers * defaultBatchSize * cycles
+	if cap < 64 {
+		cap = 64
+	}
+	return cap
+}
+
 func NewAgent(cfg *config.AgentConfig) *AgentService {
 	return &AgentService{
 		collector: agent.NewMetricsCollector(),
 		sender:    agent.NewSender(cfg.ServerURL, cfg.Key),
 		config:    cfg,
 		doneChan:  make(chan struct{}),
-		jobs:      make(chan model.Metrics, 256),
+		jobs:      make(chan model.Metrics, calcJobsBufferSize(cfg)),
 	}
 }
 
@@ -45,7 +69,7 @@ func (as *AgentService) startCollector() {
 	}
 }
 
-// запускает задачи отправки и собирает метрики, публикует задачи в пул
+// запускает производителей задач отправки; собирает метрики и публикует задачи в пул
 func (as *AgentService) startSender() {
 	ticker := time.NewTicker(as.config.ReportInterval)
 	defer ticker.Stop()
@@ -54,16 +78,31 @@ func (as *AgentService) startSender() {
 		select {
 		case <-ticker.C:
 			allMetrics := as.collector.GetMetrics()
+			// фиксируем срез для детерминированной публикации и корректного досыла при остановке
+			list := make([]model.Metrics, 0, len(allMetrics))
 			for _, m := range allMetrics {
+				list = append(list, m)
+			}
+			for i := 0; i < len(list); i++ {
+				m := list[i]
 				select {
 				case as.jobs <- m:
 				case <-as.doneChan:
+					// Остановка во время публикации — досылаем текущий и оставшиеся
+					for ; i < len(list); i++ {
+						as.jobs <- list[i]
+					}
 					close(as.jobs)
 					return
 				}
 			}
 		case <-as.doneChan:
-			// Закрываем очередь задач, чтобы завершить jobs
+			// Перед завершением — отправляем финальный снапшот метрик
+			allMetrics := as.collector.GetMetrics()
+			for _, m := range allMetrics {
+				as.jobs <- m
+			}
+			// После публикации завершаем работников закрытием очереди
 			close(as.jobs)
 			return
 		}
@@ -80,10 +119,37 @@ func (as *AgentService) startWorkers() {
 	for i := 0; i < workers; i++ {
 		go func() {
 			defer as.workersWG.Done()
-			for m := range as.jobs {
-				// отправляем по одной метрике, используя батч-метод
-				if err := as.sender.SendBatchWithRetry([]model.Metrics{m}); err != nil {
-					log.Printf("FAIL to send metric %s: %v", m.ID, err)
+
+			// Локальный буфер для батч-отправки и тикер для таймаута
+			batch := make([]model.Metrics, 0, defaultBatchSize)
+			ticker := time.NewTicker(defaultBatchTimeout)
+			defer ticker.Stop()
+
+			flush := func() {
+				if len(batch) == 0 {
+					return
+				}
+				if err := as.sender.SendBatchWithRetry(batch); err != nil {
+					log.Printf("FAIL to send batch (%d): %v", len(batch), err)
+				}
+				batch = batch[:0]
+			}
+
+			for {
+				select {
+				case m, ok := <-as.jobs:
+					if !ok {
+						// очередь закрыта — отправляем остатки и выходим
+						flush()
+						return
+					}
+					batch = append(batch, m)
+					if len(batch) >= defaultBatchSize {
+						flush()
+					}
+				case <-ticker.C:
+					// Периодическая отправка накопленных метрик
+					flush()
 				}
 			}
 		}()
@@ -112,10 +178,7 @@ func (as *AgentService) Stop() {
 }
 
 func (as *AgentService) Run() {
-	// 3 горутины:
-	// сбор runtime,
-	// сбор sys,
-	// отправитель
+	// 3 горутины: сбор runtime, сбор sys, отправитель
 	as.wg.Add(3)
 
 	// запуск воркеров отправки по лимиту
