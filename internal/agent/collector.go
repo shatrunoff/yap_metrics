@@ -25,8 +25,10 @@ func NewMetricsCollector() *MetricsCollector {
 	}
 }
 
-// обновление gauge
+// обновление gauge (внутри берёт блокировку)
 func (mc *MetricsCollector) updateGauge(name string, value float64) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
 	mc.runtimeMetrics[name] = model.Metrics{
 		ID:    name,
 		MType: model.Gauge,
@@ -34,8 +36,11 @@ func (mc *MetricsCollector) updateGauge(name string, value float64) {
 	}
 }
 
-// обновление counter
+// обновление counter (внутри берёт блокировку)
 func (mc *MetricsCollector) updateCounter(name string, delta int64) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+
 	if exist, ok := mc.runtimeMetrics[name]; ok && exist.Delta != nil {
 		*exist.Delta += delta
 		mc.runtimeMetrics[name] = exist
@@ -51,8 +56,6 @@ func (mc *MetricsCollector) updateCounter(name string, delta int64) {
 
 // сбор метрик
 func (mc *MetricsCollector) Collect() {
-	mc.mu.Lock()
-	defer mc.mu.Unlock()
 
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)

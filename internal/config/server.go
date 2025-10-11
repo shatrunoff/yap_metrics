@@ -13,6 +13,7 @@ type ServerConfig struct {
 	FileStoragePath string
 	Restore         bool
 	DatabaseDSN     string
+	Key             string
 }
 
 func DefaultServerConfig() *ServerConfig {
@@ -22,6 +23,7 @@ func DefaultServerConfig() *ServerConfig {
 		FileStoragePath: "tmp/my-metrics.json",
 		Restore:         true,
 		DatabaseDSN:     "",
+		Key:             "",
 	}
 }
 
@@ -35,6 +37,7 @@ func ParseServerConfig() *ServerConfig {
 	flag.StringVar(&cfg.FileStoragePath, "f", cfg.FileStoragePath, "File storage path")
 	flag.BoolVar(&cfg.Restore, "r", cfg.Restore, "Restore from file")
 	flag.StringVar(&cfg.DatabaseDSN, "d", cfg.DatabaseDSN, "Database DSN")
+	flag.StringVar(&cfg.Key, "k", cfg.Key, "Signing key for HashSHA256 header")
 	flag.Parse()
 
 	// Переменные окружения
@@ -56,6 +59,9 @@ func ParseServerConfig() *ServerConfig {
 	}
 	if envDSN := os.Getenv("DATABASE_DSN"); envDSN != "" {
 		cfg.DatabaseDSN = envDSN
+	}
+	if envKey := os.Getenv("KEY"); envKey != "" {
+		cfg.Key = envKey
 	}
 
 	return cfg

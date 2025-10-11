@@ -61,7 +61,7 @@ func initServer(cfg *config.ServerConfig) (*http.Server, func(), error) {
 	syncSave := cfg.StoreInterval == 0 && cfg.DatabaseDSN == ""
 
 	// Сборка HTTP-хендлера и сервера
-	serverHandler := handler.NewHandler(storageInstance, fileService, syncSave)
+	serverHandler := handler.NewHandler(storageInstance, fileService, syncSave, cfg.Key)
 	server := &http.Server{Addr: cfg.ServerURL, Handler: serverHandler}
 
 	// Функция очистки

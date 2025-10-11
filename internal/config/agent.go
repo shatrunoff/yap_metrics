@@ -6,6 +6,8 @@ type AgentConfig struct {
 	PollInterval   time.Duration
 	ReportInterval time.Duration
 	ServerURL      string
+	Key            string
+	RateLimit      int
 }
 
 func DefaultAgentConfig() *AgentConfig {
@@ -13,5 +15,7 @@ func DefaultAgentConfig() *AgentConfig {
 		PollInterval:   2 * time.Second,
 		ReportInterval: 10 * time.Second,
 		ServerURL:      "localhost:8080",
+		Key:            "",
+		RateLimit:      0,
 	}
 }
