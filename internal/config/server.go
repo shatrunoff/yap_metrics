@@ -14,6 +14,8 @@ type ServerConfig struct {
 	Restore         bool
 	DatabaseDSN     string
 	Key             string
+	AuditFile       string
+	AuditURL        string
 }
 
 func DefaultServerConfig() *ServerConfig {
@@ -24,6 +26,8 @@ func DefaultServerConfig() *ServerConfig {
 		Restore:         true,
 		DatabaseDSN:     "",
 		Key:             "",
+		AuditFile:       "",
+		AuditURL:        "",
 	}
 }
 
@@ -38,6 +42,8 @@ func ParseServerConfig() *ServerConfig {
 	flag.BoolVar(&cfg.Restore, "r", cfg.Restore, "Restore from file")
 	flag.StringVar(&cfg.DatabaseDSN, "d", cfg.DatabaseDSN, "Database DSN")
 	flag.StringVar(&cfg.Key, "k", cfg.Key, "Signing key for HashSHA256 header")
+	flag.StringVar(&cfg.AuditFile, "audit-file", cfg.AuditFile, "Audit log file path")
+	flag.StringVar(&cfg.AuditURL, "audit-url", cfg.AuditURL, "Audit log URL")
 	flag.Parse()
 
 	// Переменные окружения
@@ -62,6 +68,12 @@ func ParseServerConfig() *ServerConfig {
 	}
 	if envKey := os.Getenv("KEY"); envKey != "" {
 		cfg.Key = envKey
+	}
+	if envAuditFile := os.Getenv("AUDIT_FILE"); envAuditFile != "" {
+		cfg.AuditFile = envAuditFile
+	}
+	if envAuditURL := os.Getenv("AUDIT_URL"); envAuditURL != "" {
+		cfg.AuditURL = envAuditURL
 	}
 
 	return cfg
