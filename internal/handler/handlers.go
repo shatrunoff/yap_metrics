@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"strconv"
 	"strings"
 	"sync"
@@ -369,7 +370,8 @@ func (h *Handler) updateMetricsBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var metrics []model.Metrics
+	// Предварительная аллокация слайса для типичного размера батча
+	metrics := make([]model.Metrics, 0, 100)
 
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&metrics); err != nil {
@@ -465,6 +467,19 @@ func NewHandler(st storage.Storage, fileService *service.FileStorageService, syn
 
 	// Проверка соединения с БД
 	router.Get("/ping", handler.pingDB)
+
+	// pprof endpoints для профилирования
+	router.HandleFunc("/debug/pprof/", pprof.Index)
+	router.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	router.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	router.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	router.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	router.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+	router.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+	router.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+	router.Handle("/debug/pprof/block", pprof.Handler("block"))
+	router.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
+	router.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
 
 	return router
 }

@@ -112,7 +112,10 @@ func (mc *MetricsCollector) GetMetrics() map[string]model.Metrics {
 	mc.mu.RLock()
 	defer mc.mu.RUnlock()
 
+	// Предварительная аллокация с нужной емкостью
 	res := make(map[string]model.Metrics, len(mc.runtimeMetrics))
+
+	// Копируем вручную для лучшего контроля над аллокациями
 	maps.Copy(res, mc.runtimeMetrics)
 
 	return res
