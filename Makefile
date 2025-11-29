@@ -23,3 +23,5 @@ get_profiles_diff:
 	go tool pprof -top -diff_base=profiles/profile_before.pprof  profiles/profile_after.pprof
 fmt:
 	go fmt ./...
+coverage:
+	sh coverage.sh
