@@ -34,7 +34,7 @@ func TestNewAuditNotifier(t *testing.T) {
 	notifier := NewAuditNotifier(logger)
 
 	if notifier == nil {
-		t.Error("expected non-nil notifier")
+		t.Fatal("expected non-nil notifier")
 	}
 	if notifier.logger == nil {
 		t.Error("expected logger to be set")

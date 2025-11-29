@@ -9,7 +9,7 @@ import (
 func TestNewMetricsCollector(t *testing.T) {
 	mc := NewMetricsCollector()
 	if mc == nil {
-		t.Error("expected non-nil MetricsCollector")
+		t.Fatal("expected non-nil MetricsCollector")
 	}
 	if mc.runtimeMetrics == nil {
 		t.Error("expected runtimeMetrics to be initialized")
