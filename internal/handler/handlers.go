@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/http/pprof"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/shatrunoff/yap_metrics/internal/audit"
 	"github.com/shatrunoff/yap_metrics/internal/middleware"
 	"github.com/shatrunoff/yap_metrics/internal/model"
 	"github.com/shatrunoff/yap_metrics/internal/service"
@@ -69,6 +72,30 @@ type Handler struct {
 		SaveToFile(path string) error
 		LoadFromFile(filename string) error
 	}
+	auditNotifier *audit.AuditNotifier
+}
+
+// getClientIP извлекает IP-адрес клиента из запроса
+func getClientIP(r *http.Request) string {
+	// Проверяем X-Forwarded-For
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		ips := strings.Split(xff, ",")
+		if len(ips) > 0 {
+			return strings.TrimSpace(ips[0])
+		}
+	}
+
+	// Проверяем X-Real-IP
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return xri
+	}
+
+	// Используем RemoteAddr
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return ip
 }
 
 func (h *Handler) pingDB(w http.ResponseWriter, r *http.Request) {
@@ -130,6 +157,12 @@ func (h *Handler) updateMetric(w http.ResponseWriter, r *http.Request) {
 		} else {
 			h.logger.Info("Metrics saved synchronously")
 		}
+	}
+
+	// Отправляем событие аудита
+	if h.auditNotifier != nil && h.auditNotifier.HasObservers() {
+		event := audit.CreateEvent([]string{metricName}, getClientIP(r))
+		h.auditNotifier.Notify(event)
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -267,6 +300,12 @@ func (h *Handler) updateMetricJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Отправляем событие аудита
+	if h.auditNotifier != nil && h.auditNotifier.HasObservers() {
+		event := audit.CreateEvent([]string{metric.ID}, getClientIP(r))
+		h.auditNotifier.Notify(event)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(updatedMetric); err != nil {
@@ -331,7 +370,8 @@ func (h *Handler) updateMetricsBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var metrics []model.Metrics
+	// Предварительная аллокация слайса для типичного размера батча
+	metrics := make([]model.Metrics, 0, 100)
 
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&metrics); err != nil {
@@ -363,11 +403,21 @@ func (h *Handler) updateMetricsBatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Отправляем событие аудита
+	if h.auditNotifier != nil && h.auditNotifier.HasObservers() {
+		metricNames := make([]string, len(metrics))
+		for i, m := range metrics {
+			metricNames[i] = m.ID
+		}
+		event := audit.CreateEvent(metricNames, getClientIP(r))
+		h.auditNotifier.Notify(event)
+	}
+
 	w.WriteHeader(http.StatusOK)
 }
 
 // основной хэндлер
-func NewHandler(st storage.Storage, fileService *service.FileStorageService, syncSave bool, key string) http.Handler {
+func NewHandler(st storage.Storage, fileService *service.FileStorageService, syncSave bool, key string, auditNotifier *audit.AuditNotifier) http.Handler {
 	// Инициализируем логгер
 	err := middleware.InitLogger()
 	if err != nil {
@@ -379,13 +429,14 @@ func NewHandler(st storage.Storage, fileService *service.FileStorageService, syn
 	sugar := middleware.GetSugar()
 
 	handler := &Handler{
-		reader:      st,
-		writer:      st,
-		health:      st,
-		fileService: fileService,
-		syncSave:    syncSave,
-		logger:      logger,
-		sugar:       sugar,
+		reader:        st,
+		writer:        st,
+		health:        st,
+		fileService:   fileService,
+		syncSave:      syncSave,
+		logger:        logger,
+		sugar:         sugar,
+		auditNotifier: auditNotifier,
 	}
 
 	// Проверяем, поддерживает ли хранилище файловые операции
@@ -416,6 +467,19 @@ func NewHandler(st storage.Storage, fileService *service.FileStorageService, syn
 
 	// Проверка соединения с БД
 	router.Get("/ping", handler.pingDB)
+
+	// pprof endpoints для профилирования
+	router.HandleFunc("/debug/pprof/", pprof.Index)
+	router.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	router.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	router.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	router.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	router.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+	router.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+	router.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+	router.Handle("/debug/pprof/block", pprof.Handler("block"))
+	router.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
+	router.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
 
 	return router
 }

@@ -74,7 +74,8 @@ func (ms *MemStorage) GetAll(ctx context.Context) (map[string]model.Metrics, err
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 
-	result := make(map[string]model.Metrics)
+	// Предварительная аллокация карты с нужным размером
+	result := make(map[string]model.Metrics, len(ms.gauges)+len(ms.counters))
 
 	for name, value := range ms.gauges {
 		v := value

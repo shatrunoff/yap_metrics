@@ -28,3 +28,5 @@ metricstest_v2-darwin-arm64
 
 *.DS_Store
 test.sh
+load_test.sh
+coverage.sh

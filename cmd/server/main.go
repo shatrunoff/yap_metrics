@@ -4,14 +4,17 @@ import (
 	"context"
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/shatrunoff/yap_metrics/internal/audit"
 	"github.com/shatrunoff/yap_metrics/internal/config"
 	"github.com/shatrunoff/yap_metrics/internal/handler"
+	"github.com/shatrunoff/yap_metrics/internal/middleware"
 	"github.com/shatrunoff/yap_metrics/internal/service"
 	"github.com/shatrunoff/yap_metrics/internal/storage"
 )
@@ -60,8 +63,30 @@ func initServer(cfg *config.ServerConfig) (*http.Server, func(), error) {
 	// Определяем необходимость синхронного сохранения (только для файлового хранилища)
 	syncSave := cfg.StoreInterval == 0 && cfg.DatabaseDSN == ""
 
+	// Создаем аудит-нотификатор
+	var auditNotifier *audit.AuditNotifier
+	if cfg.AuditFile != "" || cfg.AuditURL != "" {
+		// Инициализируем логгер для аудита
+		if err := middleware.InitLogger(); err != nil {
+			log.Printf("Failed to init logger for audit: %v", err)
+		}
+		auditNotifier = audit.NewAuditNotifier(middleware.GetLogger())
+
+		// Добавляем FileObserver
+		if cfg.AuditFile != "" {
+			auditNotifier.Subscribe(audit.NewFileObserver(cfg.AuditFile))
+			log.Printf("Audit file observer registered: %s", cfg.AuditFile)
+		}
+
+		// Добавляем URLObserver
+		if cfg.AuditURL != "" {
+			auditNotifier.Subscribe(audit.NewURLObserver(cfg.AuditURL))
+			log.Printf("Audit URL observer registered: %s", cfg.AuditURL)
+		}
+	}
+
 	// Сборка HTTP-хендлера и сервера
-	serverHandler := handler.NewHandler(storageInstance, fileService, syncSave, cfg.Key)
+	serverHandler := handler.NewHandler(storageInstance, fileService, syncSave, cfg.Key, auditNotifier)
 	server := &http.Server{Addr: cfg.ServerURL, Handler: serverHandler}
 
 	// Функция очистки
