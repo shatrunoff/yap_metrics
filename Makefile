@@ -1,7 +1,9 @@
 build:
 	make fmt
+	make libs
 	CGO_ENABLED=0 go build -o ./cmd/agent ./cmd/agent
 	CGO_ENABLED=0 go build -o ./cmd/server ./cmd/server
+	CGO_ENABLED=0 go build -o ./cmd/staticlint ./cmd/staticlint
 libs:
 	go mod tidy
 	go mod vendor
@@ -25,3 +27,5 @@ fmt:
 	go fmt ./...
 coverage:
 	sh coverage.sh
+staticlint:
+	./cmd/staticlint/staticlint ./...
