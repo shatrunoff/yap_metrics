@@ -30,3 +30,5 @@ coverage:
 	sh coverage.sh
 staticlint:
 	./cmd/staticlint/staticlint ./...
+reset:
+	./cmd/reset/reset
