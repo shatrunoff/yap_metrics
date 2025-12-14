@@ -34,7 +34,7 @@ func New[T any](newFunc func() T) *Pool[T] {
 func (p *Pool[T]) Get() T {
 	item := p.pool.Get().(T)
 
-	if resetter, ok := any(&item).(interface{ Reset() }); ok {
+	if resetter, ok := any(item).(interface{ Reset() }); ok {
 		resetter.Reset()
 	}
 

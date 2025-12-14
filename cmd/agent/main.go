@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -12,6 +13,35 @@ import (
 	"github.com/shatrunoff/yap_metrics/internal/config"
 	"github.com/shatrunoff/yap_metrics/internal/service"
 )
+
+// Глобальные переменные для сборки
+var (
+	buildVersion string
+	buildDate    string
+	buildCommit  string
+)
+
+// printBuildInfo выводит информацию о сборке.
+func printBuildInfo() {
+	version := "N/A"
+	if buildVersion != "" {
+		version = buildVersion
+	}
+
+	date := "N/A"
+	if buildDate != "" {
+		date = buildDate
+	}
+
+	commit := "N/A"
+	if buildCommit != "" {
+		commit = buildCommit
+	}
+
+	fmt.Printf("Build version: %s\n", version)
+	fmt.Printf("Build date: %s\n", date)
+	fmt.Printf("Build commit: %s\n", commit)
+}
 
 func parseAgentConfig() *config.AgentConfig {
 	var pollSec int
@@ -75,6 +105,9 @@ func parseAgentConfig() *config.AgentConfig {
 }
 
 func main() {
+	// Выводим информацию о сборке
+	printBuildInfo()
+
 	// инициализация конфига и агента
 	cfg := parseAgentConfig()
 

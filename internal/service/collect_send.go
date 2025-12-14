@@ -37,10 +37,7 @@ func calcJobsBufferSize(cfg *config.AgentConfig) int {
 	if cycles < 1 {
 		cycles = 1
 	}
-	cap := workers * defaultBatchSize * cycles
-	if cap < 64 {
-		cap = 64
-	}
+	cap := max(workers*defaultBatchSize*cycles, 64)
 	return cap
 }
 

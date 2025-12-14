@@ -176,7 +176,9 @@ func getTypeName(expr ast.Expr) string {
 	case *ast.StarExpr:
 		return "*" + getTypeName(t.X)
 	case *ast.SelectorExpr:
-		return getTypeName(t.X) + "." + t.Sel.Name
+		// Для импортированных типов возвращаем только имя селектора
+		// например, для "time.Time" -> "Time"
+		return t.Sel.Name
 	case *ast.ArrayType:
 		return "[]" + getTypeName(t.Elt)
 	case *ast.MapType:
