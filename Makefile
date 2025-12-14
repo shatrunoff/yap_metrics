@@ -5,6 +5,7 @@ build:
 	CGO_ENABLED=0 go build -o ./cmd/server ./cmd/server
 	CGO_ENABLED=0 go build -o ./cmd/staticlint ./cmd/staticlint
 	CGO_ENABLED=0 go build -o ./cmd/reset ./cmd/reset
+	CGO_ENABLED=0 go build -o ./cmd/pool ./cmd/pool
 libs:
 	go mod tidy
 	go mod vendor
