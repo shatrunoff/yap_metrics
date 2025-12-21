@@ -17,6 +17,7 @@ import (
 	"github.com/shatrunoff/yap_metrics/internal/middleware"
 	"github.com/shatrunoff/yap_metrics/internal/service"
 	"github.com/shatrunoff/yap_metrics/internal/storage"
+	"github.com/shatrunoff/yap_metrics/internal/utils"
 )
 
 // initServer собирает все зависимости и возвращает http.Server и функцию очистки ресурсов
@@ -103,6 +104,10 @@ func initServer(cfg *config.ServerConfig) (*http.Server, func(), error) {
 }
 
 func main() {
+
+	// Выводим информацию о сборке
+	utils.PrintBuildInfo()
+
 	cfg := config.ParseServerConfig()
 
 	log.Printf("Starting server with config: Address=%s, StoreInterval=%v, FileStoragePath=%s, Restore=%v, DatabaseDSN=%v",

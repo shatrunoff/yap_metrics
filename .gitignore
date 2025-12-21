@@ -16,6 +16,9 @@ cmd/agent/main
 cmd/agent/agent
 cmd/server/main
 cmd/server/server
+cmd/staticlint/staticlint
+cmd/reset/reset
+cmd/pool/pool
 
 # Dependency directories (remove the comment below to include it)
 vendor/
@@ -25,8 +28,9 @@ vendor/
 .vscode
 metricstest-darwin-arm64
 metricstest_v2-darwin-arm64
-
 *.DS_Store
+
+# sh files
 test.sh
 load_test.sh
 coverage.sh

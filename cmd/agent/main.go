@@ -11,6 +11,7 @@ import (
 
 	"github.com/shatrunoff/yap_metrics/internal/config"
 	"github.com/shatrunoff/yap_metrics/internal/service"
+	"github.com/shatrunoff/yap_metrics/internal/utils"
 )
 
 func parseAgentConfig() *config.AgentConfig {
@@ -75,6 +76,10 @@ func parseAgentConfig() *config.AgentConfig {
 }
 
 func main() {
+
+	// выводим информацию о сборке
+	utils.PrintBuildInfo()
+
 	// инициализация конфига и агента
 	cfg := parseAgentConfig()
 
