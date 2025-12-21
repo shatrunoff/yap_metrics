@@ -43,10 +43,6 @@ func (p *Pool[T]) Get() T {
 
 // Put помещает объект обратно в пул.
 func (p *Pool[T]) Put(item T) {
-	// Сбрасываем объект перед возвращением в пул
-	if resetter, ok := any(&item).(interface{ Reset() }); ok {
-		resetter.Reset()
-	}
 	p.pool.Put(item)
 }
 

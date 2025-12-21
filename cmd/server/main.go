@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
@@ -18,36 +17,8 @@ import (
 	"github.com/shatrunoff/yap_metrics/internal/middleware"
 	"github.com/shatrunoff/yap_metrics/internal/service"
 	"github.com/shatrunoff/yap_metrics/internal/storage"
+	"github.com/shatrunoff/yap_metrics/internal/utils"
 )
-
-// Глобальные переменные для сборки.
-var (
-	buildVersion string
-	buildDate    string
-	buildCommit  string
-)
-
-// printBuildInfo выводит информацию о сборке.
-func printBuildInfo() {
-	version := "N/A"
-	if buildVersion != "" {
-		version = buildVersion
-	}
-
-	date := "N/A"
-	if buildDate != "" {
-		date = buildDate
-	}
-
-	commit := "N/A"
-	if buildCommit != "" {
-		commit = buildCommit
-	}
-
-	fmt.Printf("Build version: %s\n", version)
-	fmt.Printf("Build date: %s\n", date)
-	fmt.Printf("Build commit: %s\n", commit)
-}
 
 // initServer собирает все зависимости и возвращает http.Server и функцию очистки ресурсов
 func initServer(cfg *config.ServerConfig) (*http.Server, func(), error) {
@@ -135,7 +106,7 @@ func initServer(cfg *config.ServerConfig) (*http.Server, func(), error) {
 func main() {
 
 	// Выводим информацию о сборке
-	printBuildInfo()
+	utils.PrintBuildInfo()
 
 	cfg := config.ParseServerConfig()
 

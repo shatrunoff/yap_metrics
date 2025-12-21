@@ -1,4 +1,4 @@
-package main
+package utils
 
 import (
 	"io"
@@ -11,19 +11,19 @@ import (
 // Тест с установленной информацией о сборке
 func TestPrintBuildInfoFull(t *testing.T) {
 	// Подменяем глобальные переменные сборки
-	originalVersion := buildVersion
-	originalDate := buildDate
-	originalCommit := buildCommit
+	originalVersion := BuildVersion
+	originalDate := BuildDate
+	originalCommit := BuildCommit
 
-	buildVersion = "v1.2.3"
-	buildDate = "2023-01-01T00:00:00Z"
-	buildCommit = "abc123def456"
+	BuildVersion = "v1.2.3"
+	BuildDate = "2023-01-01T00:00:00Z"
+	BuildCommit = "abc123def456"
 
 	defer func() {
 		// Восстанавливаем значения
-		buildVersion = originalVersion
-		buildDate = originalDate
-		buildCommit = originalCommit
+		BuildVersion = originalVersion
+		BuildDate = originalDate
+		BuildCommit = originalCommit
 	}()
 
 	// Перехватываем stdout
@@ -31,7 +31,7 @@ func TestPrintBuildInfoFull(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	printBuildInfo()
+	PrintBuildInfo()
 
 	w.Close()
 	out, _ := io.ReadAll(r)
@@ -44,19 +44,19 @@ func TestPrintBuildInfoFull(t *testing.T) {
 // Тест, когда информация о сборке не установлена (все N/A)
 func TestPrintBuildInfoNA(t *testing.T) {
 	// Подменяем глобальные переменные сборки
-	originalVersion := buildVersion
-	originalDate := buildDate
-	originalCommit := buildCommit
+	originalVersion := BuildVersion
+	originalDate := BuildDate
+	originalCommit := BuildCommit
 
-	buildVersion = ""
-	buildDate = ""
-	buildCommit = ""
+	BuildVersion = ""
+	BuildDate = ""
+	BuildCommit = ""
 
 	defer func() {
 		// Восстанавливаем значения
-		buildVersion = originalVersion
-		buildDate = originalDate
-		buildCommit = originalCommit
+		BuildVersion = originalVersion
+		BuildDate = originalDate
+		BuildCommit = originalCommit
 	}()
 
 	// Перехватываем stdout
@@ -64,7 +64,7 @@ func TestPrintBuildInfoNA(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	printBuildInfo()
+	PrintBuildInfo()
 
 	w.Close()
 	out, _ := io.ReadAll(r)
@@ -77,19 +77,19 @@ func TestPrintBuildInfoNA(t *testing.T) {
 // Тест смешанного сценария (некоторые поля установлены, некоторые нет)
 func TestPrintBuildInfoMixed(t *testing.T) {
 	// Подменяем глобальные переменные сборки
-	originalVersion := buildVersion
-	originalDate := buildDate
-	originalCommit := buildCommit
+	originalVersion := BuildVersion
+	originalDate := BuildDate
+	originalCommit := BuildCommit
 
-	buildVersion = "v2.0.0"
-	buildDate = ""
-	buildCommit = "xyz789"
+	BuildVersion = "v2.0.0"
+	BuildDate = ""
+	BuildCommit = "xyz789"
 
 	defer func() {
 		// Восстанавливаем значения
-		buildVersion = originalVersion
-		buildDate = originalDate
-		buildCommit = originalCommit
+		BuildVersion = originalVersion
+		BuildDate = originalDate
+		BuildCommit = originalCommit
 	}()
 
 	// Перехватываем stdout
@@ -97,7 +97,7 @@ func TestPrintBuildInfoMixed(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	printBuildInfo()
+	PrintBuildInfo()
 
 	w.Close()
 	out, _ := io.ReadAll(r)

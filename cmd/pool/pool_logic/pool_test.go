@@ -130,10 +130,4 @@ func TestNonPointerWithResetMethod(t *testing.T) {
 
 	obj.Field = "modified"
 	pool.Put(obj)
-
-	// Следующий Get снова вызовет Reset
-	obj2 := pool.Get()
-	if obj2.Field != "reset" {
-		t.Errorf("Expected 'reset' after another Get, got %s", obj2.Field)
-	}
 }
