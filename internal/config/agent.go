@@ -8,6 +8,7 @@ type AgentConfig struct {
 	ServerURL      string
 	Key            string
 	RateLimit      int
+	CryptoKey      string
 }
 
 func DefaultAgentConfig() *AgentConfig {
@@ -17,5 +18,6 @@ func DefaultAgentConfig() *AgentConfig {
 		ServerURL:      "localhost:8080",
 		Key:            "",
 		RateLimit:      0,
+		CryptoKey:      "",
 	}
 }

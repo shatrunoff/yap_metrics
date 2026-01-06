@@ -87,7 +87,12 @@ func initServer(cfg *config.ServerConfig) (*http.Server, func(), error) {
 	}
 
 	// Сборка HTTP-хендлера и сервера
-	serverHandler := handler.NewHandler(storageInstance, fileService, syncSave, cfg.Key, auditNotifier)
+	var serverHandler http.Handler
+	if cfg.CryptoKey != "" {
+		serverHandler = handler.NewHandlerWithCrypto(storageInstance, fileService, syncSave, cfg.Key, auditNotifier, cfg.CryptoKey)
+	} else {
+		serverHandler = handler.NewHandler(storageInstance, fileService, syncSave, cfg.Key, auditNotifier)
+	}
 	server := &http.Server{Addr: cfg.ServerURL, Handler: serverHandler}
 
 	// Функция очистки

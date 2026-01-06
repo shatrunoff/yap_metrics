@@ -19,6 +19,7 @@ func parseAgentConfig() *config.AgentConfig {
 	var repSec int
 	var key string
 	var rateLimit int
+	var cryptoKey string
 
 	// получаем конфиг по умолчанию
 	cfg := config.DefaultAgentConfig()
@@ -28,6 +29,7 @@ func parseAgentConfig() *config.AgentConfig {
 	flag.IntVar(&pollSec, "p", int(cfg.PollInterval.Seconds()), "PollInterval (s)")
 	flag.IntVar(&repSec, "r", int(cfg.ReportInterval.Seconds()), "ReportInterval (s)")
 	flag.StringVar(&key, "k", cfg.Key, "Signing key for HashSHA256 header")
+	flag.StringVar(&cryptoKey, "crypto-key", cfg.CryptoKey, "Path to public key file for encryption")
 	flag.IntVar(&rateLimit, "l", cfg.RateLimit, "Max concurrent outgoing requests")
 	flag.Parse()
 
@@ -35,6 +37,9 @@ func parseAgentConfig() *config.AgentConfig {
 	cfg.ReportInterval = time.Duration(repSec) * time.Second
 	if key != "" {
 		cfg.Key = key
+	}
+	if cryptoKey != "" {
+		cfg.CryptoKey = cryptoKey
 	}
 	if rateLimit > 0 {
 		cfg.RateLimit = rateLimit
@@ -52,6 +57,10 @@ func parseAgentConfig() *config.AgentConfig {
 	// KEY
 	if envKey := os.Getenv("KEY"); envKey != "" {
 		cfg.Key = envKey
+	}
+	// CRYPTO_KEY
+	if envCryptoKey := os.Getenv("CRYPTO_KEY"); envCryptoKey != "" {
+		cfg.CryptoKey = envCryptoKey
 	}
 	// REPORT_INTERVAL
 	if envReportInterval := os.Getenv("REPORT_INTERVAL"); envReportInterval != "" {

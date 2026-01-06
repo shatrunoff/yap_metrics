@@ -16,6 +16,7 @@ type ServerConfig struct {
 	Key             string
 	AuditFile       string
 	AuditURL        string
+	CryptoKey       string
 }
 
 func DefaultServerConfig() *ServerConfig {
@@ -28,6 +29,7 @@ func DefaultServerConfig() *ServerConfig {
 		Key:             "",
 		AuditFile:       "",
 		AuditURL:        "",
+		CryptoKey:       "",
 	}
 }
 
@@ -42,6 +44,7 @@ func ParseServerConfig() *ServerConfig {
 	flag.BoolVar(&cfg.Restore, "r", cfg.Restore, "Restore from file")
 	flag.StringVar(&cfg.DatabaseDSN, "d", cfg.DatabaseDSN, "Database DSN")
 	flag.StringVar(&cfg.Key, "k", cfg.Key, "Signing key for HashSHA256 header")
+	flag.StringVar(&cfg.CryptoKey, "crypto-key", cfg.CryptoKey, "Path to private key file for decryption")
 	flag.StringVar(&cfg.AuditFile, "audit-file", cfg.AuditFile, "Audit log file path")
 	flag.StringVar(&cfg.AuditURL, "audit-url", cfg.AuditURL, "Audit log URL")
 	flag.Parse()
@@ -68,6 +71,9 @@ func ParseServerConfig() *ServerConfig {
 	}
 	if envKey := os.Getenv("KEY"); envKey != "" {
 		cfg.Key = envKey
+	}
+	if envCryptoKey := os.Getenv("CRYPTO_KEY"); envCryptoKey != "" {
+		cfg.CryptoKey = envCryptoKey
 	}
 	if envAuditFile := os.Getenv("AUDIT_FILE"); envAuditFile != "" {
 		cfg.AuditFile = envAuditFile

@@ -42,9 +42,21 @@ func calcJobsBufferSize(cfg *config.AgentConfig) int {
 }
 
 func NewAgent(cfg *config.AgentConfig) *AgentService {
+	var sender *agent.Sender
+	var err error
+
+	if cfg.CryptoKey != "" {
+		sender, err = agent.NewSenderWithCrypto(cfg.ServerURL, cfg.Key, cfg.CryptoKey)
+		if err != nil {
+			log.Fatalf("Failed to create sender with crypto: %v", err)
+		}
+	} else {
+		sender = agent.NewSender(cfg.ServerURL, cfg.Key)
+	}
+
 	return &AgentService{
 		collector: agent.NewMetricsCollector(),
-		sender:    agent.NewSender(cfg.ServerURL, cfg.Key),
+		sender:    sender,
 		config:    cfg,
 		doneChan:  make(chan struct{}),
 		jobs:      make(chan model.Metrics, calcJobsBufferSize(cfg)),
