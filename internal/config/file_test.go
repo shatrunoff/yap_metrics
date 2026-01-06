@@ -80,3 +80,60 @@ func TestLoadAgentConfigFromFile(t *testing.T) {
 		t.Errorf("Expected poll_interval 3s, got %s", config.PollInterval)
 	}
 }
+func TestLoadServerConfigFromFileErrors(t *testing.T) {
+	// Test empty filename
+	config, err := LoadServerConfigFromFile("")
+	if err != nil || config != nil {
+		t.Error("Expected nil config and no error for empty filename")
+	}
+
+	// Test non-existent file
+	_, err = LoadServerConfigFromFile("nonexistent.json")
+	if err == nil {
+		t.Error("Expected error for non-existent file")
+	}
+
+	// Test invalid JSON
+	tmpFile, err := os.CreateTemp("", "invalid_*.json")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	tmpFile.WriteString("invalid json")
+	tmpFile.Close()
+
+	_, err = LoadServerConfigFromFile(tmpFile.Name())
+	if err == nil {
+		t.Error("Expected error for invalid JSON")
+	}
+}
+
+func TestLoadAgentConfigFromFileErrors(t *testing.T) {
+	// Test empty filename
+	config, err := LoadAgentConfigFromFile("")
+	if err != nil || config != nil {
+		t.Error("Expected nil config and no error for empty filename")
+	}
+
+	// Test non-existent file
+	_, err = LoadAgentConfigFromFile("nonexistent.json")
+	if err == nil {
+		t.Error("Expected error for non-existent file")
+	}
+
+	// Test invalid JSON
+	tmpFile, err := os.CreateTemp("", "invalid_*.json")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	tmpFile.WriteString("invalid json")
+	tmpFile.Close()
+
+	_, err = LoadAgentConfigFromFile(tmpFile.Name())
+	if err == nil {
+		t.Error("Expected error for invalid JSON")
+	}
+}

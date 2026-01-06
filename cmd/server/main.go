@@ -151,7 +151,7 @@ func main() {
 	log.Printf("Server started successfully")
 
 	stopChan := make(chan os.Signal, 1)
-	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 	<-stopChan
 
 	log.Printf("Shutting down server...")

@@ -180,7 +180,13 @@ func (as *AgentService) startSysCollector() {
 }
 
 func (as *AgentService) Stop() {
-	close(as.doneChan)
+	select {
+	case <-as.doneChan:
+		// Already closed
+		return
+	default:
+		close(as.doneChan)
+	}
 	as.wg.Wait()
 	// дожидаемся завершения всех воркеров
 	as.workersWG.Wait()
