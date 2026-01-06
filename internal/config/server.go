@@ -38,6 +38,7 @@ func ParseServerConfig() *ServerConfig {
 
 	// Флаги командной строки
 	var storeIntervalSec int
+	var configFile string
 	flag.StringVar(&cfg.ServerURL, "a", cfg.ServerURL, "Server address host:port")
 	flag.IntVar(&storeIntervalSec, "i", int(cfg.StoreInterval.Seconds()), "Store interval in seconds")
 	flag.StringVar(&cfg.FileStoragePath, "f", cfg.FileStoragePath, "File storage path")
@@ -47,9 +48,45 @@ func ParseServerConfig() *ServerConfig {
 	flag.StringVar(&cfg.CryptoKey, "crypto-key", cfg.CryptoKey, "Path to private key file for decryption")
 	flag.StringVar(&cfg.AuditFile, "audit-file", cfg.AuditFile, "Audit log file path")
 	flag.StringVar(&cfg.AuditURL, "audit-url", cfg.AuditURL, "Audit log URL")
+	flag.StringVar(&configFile, "c", "", "Config file path")
+	flag.StringVar(&configFile, "config", "", "Config file path")
 	flag.Parse()
 
-	// Переменные окружения
+	// Получаем путь к файлу конфигурации из переменной окружения, если не задан флагом
+	if configFile == "" {
+		configFile = os.Getenv("CONFIG")
+	}
+
+	// Загружаем конфигурацию из файла (приоритет ниже флагов и переменных окружения)
+	if fileConfig, err := LoadServerConfigFromFile(configFile); err == nil && fileConfig != nil {
+		if fileConfig.Address != "" {
+			cfg.ServerURL = fileConfig.Address
+		}
+		if fileConfig.StoreInterval != "" {
+			if duration, err := time.ParseDuration(fileConfig.StoreInterval); err == nil {
+				cfg.StoreInterval = duration
+			}
+		}
+		if fileConfig.StoreFile != "" {
+			cfg.FileStoragePath = fileConfig.StoreFile
+		}
+		if fileConfig.Restore != nil {
+			cfg.Restore = *fileConfig.Restore
+		}
+		if fileConfig.DatabaseDSN != "" {
+			cfg.DatabaseDSN = fileConfig.DatabaseDSN
+		}
+		if fileConfig.CryptoKey != "" {
+			cfg.CryptoKey = fileConfig.CryptoKey
+		}
+	}
+
+	// Применяем storeIntervalSec из флагов
+	if storeIntervalSec != int(DefaultServerConfig().StoreInterval.Seconds()) {
+		cfg.StoreInterval = time.Duration(storeIntervalSec) * time.Second
+	}
+
+	// Переменные окружения (наивысший приоритет)
 	if envAddr := os.Getenv("ADDRESS"); envAddr != "" {
 		cfg.ServerURL = envAddr
 	}
