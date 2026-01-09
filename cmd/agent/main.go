@@ -19,7 +19,10 @@ func main() {
 	// инициализация конфига и агента
 	cfg := config.ParseAgentConfig()
 
-	agent := service.NewAgent(cfg)
+	agent, err := service.NewAgent(cfg)
+	if err != nil {
+		log.Fatalf("Failed to create agent: %v", err)
+	}
 
 	go agent.Run()
 	log.Printf("Metric collector app started with config: %+v", cfg)

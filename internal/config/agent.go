@@ -28,105 +28,110 @@ func DefaultAgentConfig() *AgentConfig {
 	}
 }
 
-func ParseAgentConfig() *AgentConfig {
-	var pollSec int
-	var repSec int
-	var key string
-	var rateLimit int
-	var cryptoKey string
-	var configFile string
+type agentFlags struct {
+	pollSec    int
+	repSec     int
+	key        string
+	rateLimit  int
+	cryptoKey  string
+	configFile string
+}
 
-	// получаем конфиг по умолчанию
-	cfg := DefaultAgentConfig()
-
-	// парсим аргументы командной строки
+func parseAgentFlags(cfg *AgentConfig) *agentFlags {
+	f := &agentFlags{}
 	flag.StringVar(&cfg.ServerURL, "a", cfg.ServerURL, "Server address host: ")
-	flag.IntVar(&pollSec, "p", int(cfg.PollInterval.Seconds()), "PollInterval (s)")
-	flag.IntVar(&repSec, "r", int(cfg.ReportInterval.Seconds()), "ReportInterval (s)")
-	flag.StringVar(&key, "k", cfg.Key, "Signing key for HashSHA256 header")
-	flag.StringVar(&cryptoKey, "crypto-key", cfg.CryptoKey, "Path to public key file for encryption")
-	flag.IntVar(&rateLimit, "l", cfg.RateLimit, "Max concurrent outgoing requests")
-	flag.StringVar(&configFile, "c", "", "Config file path")
-	flag.StringVar(&configFile, "config", "", "Config file path")
+	flag.IntVar(&f.pollSec, "p", int(cfg.PollInterval.Seconds()), "PollInterval (s)")
+	flag.IntVar(&f.repSec, "r", int(cfg.ReportInterval.Seconds()), "ReportInterval (s)")
+	flag.StringVar(&f.key, "k", cfg.Key, "Signing key for HashSHA256 header")
+	flag.StringVar(&f.cryptoKey, "crypto-key", cfg.CryptoKey, "Path to public key file for encryption")
+	flag.IntVar(&f.rateLimit, "l", cfg.RateLimit, "Max concurrent outgoing requests")
+	flag.StringVar(&f.configFile, "c", "", "Config file path")
+	flag.StringVar(&f.configFile, "config", "", "Config file path")
 	flag.Parse()
 
 	if flag.NArg() > 0 {
 		log.Fatalf("ERROR: unknown arguments: %v", flag.Args())
 	}
+	return f
+}
 
-	// Получаем путь к файлу конфигурации из переменной окружения, если не задан флагом
+func applyAgentFileConfig(cfg *AgentConfig, configFile string) {
 	if configFile == "" {
 		configFile = os.Getenv("CONFIG")
 	}
+	fileConfig, err := LoadAgentConfigFromFile(configFile)
+	if err != nil || fileConfig == nil {
+		return
+	}
+	if fileConfig.Address != "" {
+		cfg.ServerURL = fileConfig.Address
+	}
+	if fileConfig.ReportInterval != "" {
+		if duration, err := time.ParseDuration(fileConfig.ReportInterval); err == nil {
+			cfg.ReportInterval = duration
+		}
+	}
+	if fileConfig.PollInterval != "" {
+		if duration, err := time.ParseDuration(fileConfig.PollInterval); err == nil {
+			cfg.PollInterval = duration
+		}
+	}
+	if fileConfig.CryptoKey != "" {
+		cfg.CryptoKey = fileConfig.CryptoKey
+	}
+}
 
-	// Загружаем конфигурацию из файла (приоритет ниже флагов и переменных окружения)
-	if fileConfig, err := LoadAgentConfigFromFile(configFile); err == nil && fileConfig != nil {
-		if fileConfig.Address != "" {
-			cfg.ServerURL = fileConfig.Address
-		}
-		if fileConfig.ReportInterval != "" {
-			if duration, err := time.ParseDuration(fileConfig.ReportInterval); err == nil {
-				cfg.ReportInterval = duration
-			}
-		}
-		if fileConfig.PollInterval != "" {
-			if duration, err := time.ParseDuration(fileConfig.PollInterval); err == nil {
-				cfg.PollInterval = duration
-			}
-		}
-		if fileConfig.CryptoKey != "" {
-			cfg.CryptoKey = fileConfig.CryptoKey
-		}
+func applyAgentFlagValues(cfg *AgentConfig, f *agentFlags) {
+	defaults := DefaultAgentConfig()
+	if f.pollSec != int(defaults.PollInterval.Seconds()) {
+		cfg.PollInterval = time.Duration(f.pollSec) * time.Second
 	}
+	if f.repSec != int(defaults.ReportInterval.Seconds()) {
+		cfg.ReportInterval = time.Duration(f.repSec) * time.Second
+	}
+	if f.key != "" {
+		cfg.Key = f.key
+	}
+	if f.cryptoKey != "" {
+		cfg.CryptoKey = f.cryptoKey
+	}
+	if f.rateLimit > 0 {
+		cfg.RateLimit = f.rateLimit
+	}
+}
 
-	// Применяем значения из флагов
-	if pollSec != int(DefaultAgentConfig().PollInterval.Seconds()) {
-		cfg.PollInterval = time.Duration(pollSec) * time.Second
-	}
-	if repSec != int(DefaultAgentConfig().ReportInterval.Seconds()) {
-		cfg.ReportInterval = time.Duration(repSec) * time.Second
-	}
-	if key != "" {
-		cfg.Key = key
-	}
-	if cryptoKey != "" {
-		cfg.CryptoKey = cryptoKey
-	}
-	if rateLimit > 0 {
-		cfg.RateLimit = rateLimit
-	}
-
-	// парсим переменные окружения (наивысший приоритет)
-	// ADDRESS
+func applyAgentEnvConfig(cfg *AgentConfig) {
 	if envAddr := os.Getenv("ADDRESS"); envAddr != "" {
 		cfg.ServerURL = envAddr
 	}
-	// KEY
 	if envKey := os.Getenv("KEY"); envKey != "" {
 		cfg.Key = envKey
 	}
-	// CRYPTO_KEY
 	if envCryptoKey := os.Getenv("CRYPTO_KEY"); envCryptoKey != "" {
 		cfg.CryptoKey = envCryptoKey
 	}
-	// REPORT_INTERVAL
 	if envReportInterval := os.Getenv("REPORT_INTERVAL"); envReportInterval != "" {
 		if sec, err := strconv.Atoi(envReportInterval); err == nil {
 			cfg.ReportInterval = time.Duration(sec) * time.Second
 		}
 	}
-	// POLL_INTERVAL
 	if envPoolInterval := os.Getenv("POLL_INTERVAL"); envPoolInterval != "" {
 		if sec, err := strconv.Atoi(envPoolInterval); err == nil {
 			cfg.PollInterval = time.Duration(sec) * time.Second
 		}
 	}
-	// RATE_LIMIT
 	if envRateLimit := os.Getenv("RATE_LIMIT"); envRateLimit != "" {
 		if rl, err := strconv.Atoi(envRateLimit); err == nil && rl > 0 {
 			cfg.RateLimit = rl
 		}
 	}
+}
 
+func ParseAgentConfig() *AgentConfig {
+	cfg := DefaultAgentConfig()
+	f := parseAgentFlags(cfg)
+	applyAgentFileConfig(cfg, f.configFile)
+	applyAgentFlagValues(cfg, f)
+	applyAgentEnvConfig(cfg)
 	return cfg
 }
