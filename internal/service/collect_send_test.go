@@ -15,7 +15,7 @@ func TestAgentService_StartCollector(t *testing.T) {
 		PollInterval: 50 * time.Millisecond,
 	}
 
-	service := NewAgent(cfg)
+	service, _ := NewAgent(cfg)
 
 	// Получаем начальное состояние метрик
 	initialMetrics := service.collector.GetMetrics()
@@ -51,7 +51,7 @@ func TestAgentService_StartCollectorStopImmediately(t *testing.T) {
 		PollInterval: time.Second,
 	}
 
-	service := NewAgent(cfg)
+	service, _ := NewAgent(cfg)
 
 	// Получаем начальное состояние метрик
 	initialMetrics := service.collector.GetMetrics()
@@ -78,7 +78,7 @@ func TestAgentService_StartSysCollector(t *testing.T) {
 		PollInterval: 50 * time.Millisecond,
 	}
 
-	service := NewAgent(cfg)
+	service, _ := NewAgent(cfg)
 
 	// Получаем начальное состояние метрик
 	initialMetrics := service.collector.GetMetrics()
@@ -125,7 +125,7 @@ func TestAgentService_StartSysCollectorStopImmediately(t *testing.T) {
 		PollInterval: time.Second,
 	}
 
-	service := NewAgent(cfg)
+	service, _ := NewAgent(cfg)
 
 	// Немедленно закрываем канал завершения
 	close(service.doneChan)
@@ -143,7 +143,7 @@ func TestAgentService_CollectorRaceCondition(t *testing.T) {
 		PollInterval: 10 * time.Millisecond,
 	}
 
-	service := NewAgent(cfg)
+	service, _ := NewAgent(cfg)
 
 	// Запускаем оба сборщика одновременно
 	done1 := make(chan struct{})
@@ -180,7 +180,7 @@ func TestAgentService_CollectorTickerReset(t *testing.T) {
 		PollInterval: 100 * time.Millisecond,
 	}
 
-	service := NewAgent(cfg)
+	service, _ := NewAgent(cfg)
 
 	// Запускаем сборщик
 	done := make(chan struct{})
@@ -212,7 +212,7 @@ func TestAgentService_CollectorDefer(t *testing.T) {
 		PollInterval: 10 * time.Millisecond,
 	}
 
-	service := NewAgent(cfg)
+	service, _ := NewAgent(cfg)
 
 	// Запускаем и сразу останавливаем
 	done := make(chan struct{})
@@ -252,7 +252,7 @@ func TestAgentService_CollectorChannelOperations(t *testing.T) {
 				PollInterval: tt.pollInterval,
 			}
 
-			service := NewAgent(cfg)
+			service, _ := NewAgent(cfg)
 
 			// Запускаем сборщик
 			done := make(chan struct{})
@@ -280,7 +280,7 @@ func TestAgentService_CollectorSelectBehavior(t *testing.T) {
 		PollInterval: 100 * time.Millisecond,
 	}
 
-	service := NewAgent(cfg)
+	service, _ := NewAgent(cfg)
 
 	// Запускаем сборщик
 	done := make(chan struct{})
@@ -313,7 +313,7 @@ func TestAgentService_CollectorMemoryLeak(t *testing.T) {
 	}
 
 	for i := 0; i < 100; i++ {
-		service := NewAgent(cfg)
+		service, _ := NewAgent(cfg)
 
 		// Запускаем и быстро останавливаем
 		done := make(chan struct{})
@@ -340,7 +340,7 @@ func TestAgentService_CollectorWithRealMetrics(t *testing.T) {
 		PollInterval: 30 * time.Millisecond,
 	}
 
-	service := NewAgent(cfg)
+	service, _ := NewAgent(cfg)
 
 	// Получаем метрики до запуска
 	_ = service.collector.GetMetrics()
@@ -398,7 +398,7 @@ func TestAgentService_SystemCollectorWithRealMetrics(t *testing.T) {
 		PollInterval: 30 * time.Millisecond,
 	}
 
-	service := NewAgent(cfg)
+	service, _ := NewAgent(cfg)
 
 	// Получаем метрики до запуска
 	_ = service.collector.GetMetrics()
@@ -443,7 +443,7 @@ func TestAgentService_ConcurrentCollectAndRead(t *testing.T) {
 		PollInterval: 20 * time.Millisecond,
 	}
 
-	service := NewAgent(cfg)
+	service, _ := NewAgent(cfg)
 
 	// Запускаем сборщик
 	done := make(chan struct{})
@@ -489,7 +489,7 @@ func TestAgentService_CollectorTimeout(t *testing.T) {
 		PollInterval: 10 * time.Millisecond,
 	}
 
-	service := NewAgent(cfg)
+	service, _ := NewAgent(cfg)
 
 	// Запускаем сборщик
 	done := make(chan struct{})
@@ -519,7 +519,7 @@ func TestAgentService_CollectorRestart(t *testing.T) {
 		PollInterval: 20 * time.Millisecond,
 	}
 
-	service := NewAgent(cfg)
+	service, _ := NewAgent(cfg)
 
 	// Первый запуск
 	done1 := make(chan struct{})

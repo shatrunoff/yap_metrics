@@ -28,6 +28,8 @@ get_profiles_diff:
 fmt:
 	go fmt ./...
 coverage:
+	make libs
+	make build
 	sh coverage.sh
 staticlint:
 	./cmd/staticlint/staticlint ./...

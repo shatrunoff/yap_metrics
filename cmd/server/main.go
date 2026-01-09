@@ -87,7 +87,12 @@ func initServer(cfg *config.ServerConfig) (*http.Server, func(), error) {
 	}
 
 	// Сборка HTTP-хендлера и сервера
-	serverHandler := handler.NewHandler(storageInstance, fileService, syncSave, cfg.Key, auditNotifier)
+	var serverHandler http.Handler
+	if cfg.CryptoKey != "" {
+		serverHandler = handler.NewHandlerWithCrypto(storageInstance, fileService, syncSave, cfg.Key, auditNotifier, cfg.CryptoKey)
+	} else {
+		serverHandler = handler.NewHandler(storageInstance, fileService, syncSave, cfg.Key, auditNotifier)
+	}
 	server := &http.Server{Addr: cfg.ServerURL, Handler: serverHandler}
 
 	// Функция очистки
@@ -146,7 +151,7 @@ func main() {
 	log.Printf("Server started successfully")
 
 	stopChan := make(chan os.Signal, 1)
-	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 	<-stopChan
 
 	log.Printf("Shutting down server...")

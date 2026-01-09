@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"crypto/rsa"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/shatrunoff/yap_metrics/internal/audit"
+	"github.com/shatrunoff/yap_metrics/internal/crypto"
 	"github.com/shatrunoff/yap_metrics/internal/middleware"
 	"github.com/shatrunoff/yap_metrics/internal/model"
 	"github.com/shatrunoff/yap_metrics/internal/service"
@@ -73,6 +75,7 @@ type Handler struct {
 		LoadFromFile(filename string) error
 	}
 	auditNotifier *audit.AuditNotifier
+	privateKey    *rsa.PrivateKey
 }
 
 // getClientIP извлекает IP-адрес клиента из запроса
@@ -418,6 +421,10 @@ func (h *Handler) updateMetricsBatch(w http.ResponseWriter, r *http.Request) {
 
 // основной хэндлер
 func NewHandler(st storage.Storage, fileService *service.FileStorageService, syncSave bool, key string, auditNotifier *audit.AuditNotifier) http.Handler {
+	return NewHandlerWithCrypto(st, fileService, syncSave, key, auditNotifier, "")
+}
+
+func NewHandlerWithCrypto(st storage.Storage, fileService *service.FileStorageService, syncSave bool, key string, auditNotifier *audit.AuditNotifier, privateKeyPath string) http.Handler {
 	// Инициализируем логгер
 	err := middleware.InitLogger()
 	if err != nil {
@@ -439,6 +446,15 @@ func NewHandler(st storage.Storage, fileService *service.FileStorageService, syn
 		auditNotifier: auditNotifier,
 	}
 
+	// Загружаем приватный ключ если указан
+	if privateKeyPath != "" {
+		privateKey, err := crypto.LoadPrivateKey(privateKeyPath)
+		if err != nil {
+			panic(fmt.Sprintf("Failed to load private key: %v", err))
+		}
+		handler.privateKey = privateKey
+	}
+
 	// Проверяем, поддерживает ли хранилище файловые операции
 	if fileSaver, ok := st.(interface {
 		SaveToFile(path string) error
@@ -451,6 +467,7 @@ func NewHandler(st storage.Storage, fileService *service.FileStorageService, syn
 
 	// Middleware
 	router.Use(middleware.GzipDecompressionMiddleware)
+	router.Use(middleware.DecryptionMiddleware(handler.privateKey))
 	router.Use(middleware.SignatureMiddleware(key))
 	router.Use(middleware.LoggingMiddleware)
 	router.Use(middleware.GzipCompressionMiddleware)

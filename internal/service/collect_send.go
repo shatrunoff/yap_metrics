@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -41,14 +42,26 @@ func calcJobsBufferSize(cfg *config.AgentConfig) int {
 	return cap
 }
 
-func NewAgent(cfg *config.AgentConfig) *AgentService {
+func NewAgent(cfg *config.AgentConfig) (*AgentService, error) {
+	var sender *agent.Sender
+	var err error
+
+	if cfg.CryptoKey != "" {
+		sender, err = agent.NewSenderWithCrypto(cfg.ServerURL, cfg.Key, cfg.CryptoKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create sender with crypto: %w", err)
+		}
+	} else {
+		sender = agent.NewSender(cfg.ServerURL, cfg.Key)
+	}
+
 	return &AgentService{
 		collector: agent.NewMetricsCollector(),
-		sender:    agent.NewSender(cfg.ServerURL, cfg.Key),
+		sender:    sender,
 		config:    cfg,
 		doneChan:  make(chan struct{}),
 		jobs:      make(chan model.Metrics, calcJobsBufferSize(cfg)),
-	}
+	}, nil
 }
 
 // собирает метрики
@@ -168,7 +181,13 @@ func (as *AgentService) startSysCollector() {
 }
 
 func (as *AgentService) Stop() {
-	close(as.doneChan)
+	select {
+	case <-as.doneChan:
+		// Already closed
+		return
+	default:
+		close(as.doneChan)
+	}
 	as.wg.Wait()
 	// дожидаемся завершения всех воркеров
 	as.workersWG.Wait()

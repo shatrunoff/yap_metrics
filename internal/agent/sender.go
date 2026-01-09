@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/rsa"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/shatrunoff/yap_metrics/internal/crypto"
 	"github.com/shatrunoff/yap_metrics/internal/model"
 	"github.com/shatrunoff/yap_metrics/internal/utils"
 )
@@ -21,6 +23,7 @@ type Sender struct {
 	ServerURL string
 	Client    *http.Client
 	Key       string
+	PublicKey *rsa.PublicKey
 }
 
 func NewSender(ServerURL string, key string) *Sender {
@@ -33,20 +36,58 @@ func NewSender(ServerURL string, key string) *Sender {
 	}
 }
 
+func NewSenderWithCrypto(ServerURL string, key string, publicKeyPath string) (*Sender, error) {
+	sender := &Sender{
+		ServerURL: ServerURL,
+		Key:       key,
+		Client: &http.Client{
+			Timeout: 4 * time.Second,
+		},
+	}
+
+	if publicKeyPath != "" {
+		publicKey, err := crypto.LoadPublicKey(publicKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load public key: %w", err)
+		}
+		sender.PublicKey = publicKey
+	}
+
+	return sender, nil
+}
+
 // sendRequest отправляет gzip-сжатые JSON-данные на указанный URL
 // и при наличии ключа добавляет HMAC-SHA256 подпись исходного JSON.
 func (s *Sender) sendRequest(url string, jsonData []byte) error {
-	compressedData, err := compressData(jsonData)
-	if err != nil {
-		return fmt.Errorf("failed to compress data: %w", err)
+	var dataToSend []byte
+	var err error
+
+	// Шифруем данные если есть публичный ключ
+	if s.PublicKey != nil {
+		dataToSend, err = crypto.Encrypt(jsonData, s.PublicKey)
+		if err != nil {
+			return fmt.Errorf("failed to encrypt data: %w", err)
+		}
+	} else {
+		compressedData, err := compressData(jsonData)
+		if err != nil {
+			return fmt.Errorf("failed to compress data: %w", err)
+		}
+		dataToSend = compressedData
 	}
 
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(compressedData))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(dataToSend))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Content-Encoding", "gzip")
+
+	if s.PublicKey != nil {
+		req.Header.Set("Content-Encoding", "rsa")
+	} else {
+		req.Header.Set("Content-Encoding", "gzip")
+	}
+
 	req.Header.Set("Accept-Encoding", "gzip")
 
 	if s.Key != "" {
