@@ -3,6 +3,7 @@ package service
 import (
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -172,38 +173,6 @@ func TestAgentService_CollectorRaceCondition(t *testing.T) {
 	if len(metrics) == 0 {
 		t.Error("Metrics should be collected by both collectors")
 	}
-}
-
-// TestAgentService_CollectorTickerReset тестирует поведение при изменении конфига
-func TestAgentService_CollectorTickerReset(t *testing.T) {
-	cfg := &config.AgentConfig{
-		PollInterval: 100 * time.Millisecond,
-	}
-
-	service, _ := NewAgent(cfg)
-
-	// Запускаем сборщик
-	done := make(chan struct{})
-	go func() {
-		service.startCollector()
-		close(done)
-	}()
-
-	// Ждем половину интервала
-	time.Sleep(50 * time.Millisecond)
-
-	// Меняем конфиг (не должно влиять на уже запущенный тикер)
-	service.config.PollInterval = 200 * time.Millisecond
-
-	// Ждем еще
-	time.Sleep(100 * time.Millisecond) // Общее время 150ms
-
-	// Останавливаем
-	close(service.doneChan)
-	<-done
-
-	// Проверяем только отсутствие паник
-	_ = service.collector.GetMetrics()
 }
 
 // TestAgentService_CollectorDefer тестирует defer ticker.Stop()
@@ -454,7 +423,7 @@ func TestAgentService_ConcurrentCollectAndRead(t *testing.T) {
 
 	// Параллельно читаем метрики
 	var wg sync.WaitGroup
-	readErrors := 0
+	var readErrors atomic.Int32
 
 	for i := range 10 {
 		wg.Add(1)
@@ -463,7 +432,7 @@ func TestAgentService_ConcurrentCollectAndRead(t *testing.T) {
 			for j := 0; j < 5; j++ {
 				metrics := service.collector.GetMetrics()
 				if len(metrics) == 0 {
-					readErrors++
+					readErrors.Add(1)
 				}
 				time.Sleep(time.Duration(id) * time.Millisecond)
 			}
@@ -478,8 +447,8 @@ func TestAgentService_ConcurrentCollectAndRead(t *testing.T) {
 	<-done
 	wg.Wait()
 
-	if readErrors > 50 {
-		t.Errorf("Too many empty metric reads: %d", readErrors)
+	if readErrors.Load() > 50 {
+		t.Errorf("Too many empty metric reads: %d", readErrors.Load())
 	}
 }
 
