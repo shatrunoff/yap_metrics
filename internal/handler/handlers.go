@@ -420,11 +420,11 @@ func (h *Handler) updateMetricsBatch(w http.ResponseWriter, r *http.Request) {
 }
 
 // основной хэндлер
-func NewHandler(st storage.Storage, fileService *service.FileStorageService, syncSave bool, key string, auditNotifier *audit.AuditNotifier) http.Handler {
-	return NewHandlerWithCrypto(st, fileService, syncSave, key, auditNotifier, "")
+func NewHandler(st storage.Storage, fileService *service.FileStorageService, syncSave bool, key string, auditNotifier *audit.AuditNotifier, trustedSubnet string) http.Handler {
+	return NewHandlerWithCrypto(st, fileService, syncSave, key, auditNotifier, "", trustedSubnet)
 }
 
-func NewHandlerWithCrypto(st storage.Storage, fileService *service.FileStorageService, syncSave bool, key string, auditNotifier *audit.AuditNotifier, privateKeyPath string) http.Handler {
+func NewHandlerWithCrypto(st storage.Storage, fileService *service.FileStorageService, syncSave bool, key string, auditNotifier *audit.AuditNotifier, privateKeyPath string, trustedSubnet string) http.Handler {
 	// Инициализируем логгер
 	err := middleware.InitLogger()
 	if err != nil {
@@ -466,6 +466,7 @@ func NewHandlerWithCrypto(st storage.Storage, fileService *service.FileStorageSe
 	router := chi.NewRouter()
 
 	// Middleware
+	router.Use(middleware.TrustedSubnetMiddleware(trustedSubnet))
 	router.Use(middleware.GzipDecompressionMiddleware)
 	router.Use(middleware.DecryptionMiddleware(handler.privateKey))
 	router.Use(middleware.SignatureMiddleware(key))

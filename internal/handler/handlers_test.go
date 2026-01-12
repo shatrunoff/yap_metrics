@@ -60,7 +60,7 @@ func TestHandler_updateMetric(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			st := storage.NewMemStorage()
-			h := NewHandler(st, nil, false, "", nil)
+			h := NewHandler(st, nil, false, "", nil, "")
 
 			url := "/update/" + tt.metricType + "/" + tt.metricName + "/" + tt.metricValue
 			req := httptest.NewRequest(http.MethodPost, url, nil)
@@ -117,7 +117,7 @@ func TestHandler_getMetric(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			st := storage.NewMemStorage()
 			tt.setupMetric(st)
-			h := NewHandler(st, nil, false, "", nil)
+			h := NewHandler(st, nil, false, "", nil, "")
 
 			url := "/value/" + tt.metricType + "/" + tt.metricName
 			req := httptest.NewRequest(http.MethodGet, url, nil)
@@ -205,7 +205,7 @@ func TestHandler_updateMetricJSON(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			st := storage.NewMemStorage()
-			h := NewHandler(st, nil, false, "", nil)
+			h := NewHandler(st, nil, false, "", nil, "")
 
 			body, _ := json.Marshal(tt.metric)
 			req := httptest.NewRequest(http.MethodPost, "/update/", bytes.NewReader(body))
@@ -278,7 +278,7 @@ func TestHandler_getMetricJSON(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			st := storage.NewMemStorage()
 			tt.setupMetric(st)
-			h := NewHandler(st, nil, false, "", nil)
+			h := NewHandler(st, nil, false, "", nil, "")
 
 			body, _ := json.Marshal(tt.requestMetric)
 			req := httptest.NewRequest(http.MethodPost, "/value/", bytes.NewReader(body))
@@ -337,7 +337,7 @@ func TestHandler_updateMetricsBatch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			st := storage.NewMemStorage()
-			h := NewHandler(st, nil, false, "", nil)
+			h := NewHandler(st, nil, false, "", nil, "")
 
 			body, _ := json.Marshal(tt.metrics)
 			req := httptest.NewRequest(http.MethodPost, "/updates/", bytes.NewReader(body))
@@ -360,7 +360,7 @@ func TestHandler_listMetrics(t *testing.T) {
 	st.UpdateGauge(context.Background(), "cpu", 75.5)
 	st.UpdateCounter(context.Background(), "requests", 100)
 
-	h := NewHandler(st, nil, false, "", nil)
+	h := NewHandler(st, nil, false, "", nil, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
@@ -378,7 +378,7 @@ func TestHandler_listMetrics(t *testing.T) {
 
 func TestHandler_pingDB(t *testing.T) {
 	st := storage.NewMemStorage()
-	h := NewHandler(st, nil, false, "", nil)
+	h := NewHandler(st, nil, false, "", nil, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	w := httptest.NewRecorder()

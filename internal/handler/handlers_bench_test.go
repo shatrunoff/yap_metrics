@@ -18,7 +18,7 @@ import (
 func BenchmarkUpdateMetricJSON(b *testing.B) {
 	st := storage.NewMemStorage()
 	fileService := service.NewFileStorageService(nil, "", 0)
-	handler := NewHandler(st, fileService, false, "", nil)
+	handler := NewHandler(st, fileService, false, "", nil, "")
 
 	value := 123.45
 	metric := model.Metrics{
@@ -47,7 +47,7 @@ func BenchmarkGetMetricJSON(b *testing.B) {
 	_ = st.UpdateGauge(ctx, "TestMetric", 123.45)
 
 	fileService := service.NewFileStorageService(nil, "", 0)
-	handler := NewHandler(st, fileService, false, "", nil)
+	handler := NewHandler(st, fileService, false, "", nil, "")
 
 	metric := model.Metrics{
 		ID:    "TestMetric",
@@ -71,7 +71,7 @@ func BenchmarkGetMetricJSON(b *testing.B) {
 func BenchmarkUpdateMetricsBatch(b *testing.B) {
 	st := storage.NewMemStorage()
 	fileService := service.NewFileStorageService(nil, "", 0)
-	handler := NewHandler(st, fileService, false, "", nil)
+	handler := NewHandler(st, fileService, false, "", nil, "")
 
 	// Подготавливаем batch из 100 метрик
 	metrics := make([]model.Metrics, 100)
@@ -109,7 +109,7 @@ func BenchmarkListMetrics(b *testing.B) {
 	}
 
 	fileService := service.NewFileStorageService(nil, "", 0)
-	handler := NewHandler(st, fileService, false, "", nil)
+	handler := NewHandler(st, fileService, false, "", nil, "")
 
 	b.ResetTimer()
 	b.ReportAllocs()

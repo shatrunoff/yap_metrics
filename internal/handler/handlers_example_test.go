@@ -17,7 +17,7 @@ import (
 func Example_updateMetricGauge() {
 	// Создаем хранилище и handler
 	st := storage.NewMemStorage()
-	h := handler.NewHandler(st, nil, false, "", nil)
+	h := handler.NewHandler(st, nil, false, "", nil, "")
 
 	// Создаем тестовый запрос
 	req := httptest.NewRequest(http.MethodPost, "/update/gauge/temperature/25.5", nil)
@@ -36,7 +36,7 @@ func Example_updateMetricGauge() {
 func Example_updateMetricCounter() {
 	// Создаем хранилище и handler
 	st := storage.NewMemStorage()
-	h := handler.NewHandler(st, nil, false, "", nil)
+	h := handler.NewHandler(st, nil, false, "", nil, "")
 
 	// Создаем тестовый запрос
 	req := httptest.NewRequest(http.MethodPost, "/update/counter/requests/100", nil)
@@ -54,7 +54,7 @@ func Example_updateMetricCounter() {
 func Example_getMetric() {
 	// Создаем хранилище и handler
 	st := storage.NewMemStorage()
-	h := handler.NewHandler(st, nil, false, "", nil)
+	h := handler.NewHandler(st, nil, false, "", nil, "")
 
 	// Сначала добавляем метрику
 	updateReq := httptest.NewRequest(http.MethodPost, "/update/gauge/temperature/25.5", nil)
@@ -77,7 +77,7 @@ func Example_getMetric() {
 func Example_updateMetricJSON() {
 	// Создаем хранилище и handler
 	st := storage.NewMemStorage()
-	h := handler.NewHandler(st, nil, false, "", nil)
+	h := handler.NewHandler(st, nil, false, "", nil, "")
 
 	// Создаем метрику
 	value := 42.5
@@ -117,7 +117,7 @@ func Example_updateMetricJSON() {
 func Example_getMetricJSON() {
 	// Создаем хранилище и handler
 	st := storage.NewMemStorage()
-	h := handler.NewHandler(st, nil, false, "", nil)
+	h := handler.NewHandler(st, nil, false, "", nil, "")
 
 	// Сначала добавляем метрику
 	value := 100.0
@@ -159,7 +159,7 @@ func Example_getMetricJSON() {
 func Example_updateMetricsBatch() {
 	// Создаем хранилище и handler
 	st := storage.NewMemStorage()
-	h := handler.NewHandler(st, nil, false, "", nil)
+	h := handler.NewHandler(st, nil, false, "", nil, "")
 
 	// Создаем набор метрик
 	value1 := 75.5
@@ -204,7 +204,7 @@ func Example_updateMetricsBatch() {
 func Example_pingDB() {
 	// Создаем хранилище и handler
 	st := storage.NewMemStorage()
-	h := handler.NewHandler(st, nil, false, "", nil)
+	h := handler.NewHandler(st, nil, false, "", nil, "")
 
 	// Создаем запрос
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
@@ -224,7 +224,7 @@ func Example_pingDB() {
 func Example_listMetrics() {
 	// Создаем хранилище и handler
 	st := storage.NewMemStorage()
-	h := handler.NewHandler(st, nil, false, "", nil)
+	h := handler.NewHandler(st, nil, false, "", nil, "")
 
 	// Добавляем несколько метрик
 	value := 42.0

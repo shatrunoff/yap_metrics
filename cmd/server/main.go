@@ -89,9 +89,9 @@ func initServer(cfg *config.ServerConfig) (*http.Server, func(), error) {
 	// Сборка HTTP-хендлера и сервера
 	var serverHandler http.Handler
 	if cfg.CryptoKey != "" {
-		serverHandler = handler.NewHandlerWithCrypto(storageInstance, fileService, syncSave, cfg.Key, auditNotifier, cfg.CryptoKey)
+		serverHandler = handler.NewHandlerWithCrypto(storageInstance, fileService, syncSave, cfg.Key, auditNotifier, cfg.CryptoKey, cfg.TrustedSubnet)
 	} else {
-		serverHandler = handler.NewHandler(storageInstance, fileService, syncSave, cfg.Key, auditNotifier)
+		serverHandler = handler.NewHandler(storageInstance, fileService, syncSave, cfg.Key, auditNotifier, cfg.TrustedSubnet)
 	}
 	server := &http.Server{Addr: cfg.ServerURL, Handler: serverHandler}
 
