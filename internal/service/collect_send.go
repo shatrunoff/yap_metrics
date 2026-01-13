@@ -12,13 +12,15 @@ import (
 )
 
 type AgentService struct {
-	collector *agent.MetricsCollector
-	sender    *agent.Sender
-	config    *config.AgentConfig
-	doneChan  chan struct{}
-	wg        sync.WaitGroup
-	jobs      chan model.Metrics
-	workersWG sync.WaitGroup
+	collector  *agent.MetricsCollector
+	sender     *agent.Sender
+	grpcSender *agent.GRPCSender
+	config     *config.AgentConfig
+	doneChan   chan struct{}
+	wg         sync.WaitGroup
+	jobs       chan model.Metrics
+	workersWG  sync.WaitGroup
+	useGRPC    bool
 }
 
 // Параметры буферизации отправки метрик по умолчанию
@@ -43,25 +45,37 @@ func calcJobsBufferSize(cfg *config.AgentConfig) int {
 }
 
 func NewAgent(cfg *config.AgentConfig) (*AgentService, error) {
-	var sender *agent.Sender
-	var err error
-
-	if cfg.CryptoKey != "" {
-		sender, err = agent.NewSenderWithCrypto(cfg.ServerURL, cfg.Key, cfg.CryptoKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create sender with crypto: %w", err)
-		}
-	} else {
-		sender = agent.NewSender(cfg.ServerURL, cfg.Key)
-	}
-
-	return &AgentService{
+	as := &AgentService{
 		collector: agent.NewMetricsCollector(),
-		sender:    sender,
 		config:    cfg,
 		doneChan:  make(chan struct{}),
 		jobs:      make(chan model.Metrics, calcJobsBufferSize(cfg)),
-	}, nil
+	}
+
+	// Если указан gRPC адрес, используем gRPC
+	if cfg.GRPCAddress != "" {
+		grpcSender, err := agent.NewGRPCSender(cfg.GRPCAddress)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create gRPC sender: %w", err)
+		}
+		as.grpcSender = grpcSender
+		as.useGRPC = true
+	} else {
+		// Иначе используем HTTP
+		var sender *agent.Sender
+		var err error
+		if cfg.CryptoKey != "" {
+			sender, err = agent.NewSenderWithCrypto(cfg.ServerURL, cfg.Key, cfg.CryptoKey)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create sender with crypto: %w", err)
+			}
+		} else {
+			sender = agent.NewSender(cfg.ServerURL, cfg.Key)
+		}
+		as.sender = sender
+	}
+
+	return as, nil
 }
 
 // собирает метрики
@@ -139,7 +153,13 @@ func (as *AgentService) startWorkers() {
 				if len(batch) == 0 {
 					return
 				}
-				if err := as.sender.SendBatchWithRetry(batch); err != nil {
+				var err error
+				if as.useGRPC {
+					err = as.grpcSender.SendBatch(batch)
+				} else {
+					err = as.sender.SendBatchWithRetry(batch)
+				}
+				if err != nil {
 					log.Printf("FAIL to send batch (%d): %v", len(batch), err)
 				}
 				batch = batch[:0]
@@ -191,6 +211,10 @@ func (as *AgentService) Stop() {
 	as.wg.Wait()
 	// дожидаемся завершения всех воркеров
 	as.workersWG.Wait()
+	// закрываем gRPC соединение
+	if as.grpcSender != nil {
+		as.grpcSender.Close()
+	}
 }
 
 func (as *AgentService) Run() {

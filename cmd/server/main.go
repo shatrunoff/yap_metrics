@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -13,15 +14,17 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/shatrunoff/yap_metrics/internal/audit"
 	"github.com/shatrunoff/yap_metrics/internal/config"
+	"github.com/shatrunoff/yap_metrics/internal/grpcserver"
 	"github.com/shatrunoff/yap_metrics/internal/handler"
 	"github.com/shatrunoff/yap_metrics/internal/middleware"
 	"github.com/shatrunoff/yap_metrics/internal/service"
 	"github.com/shatrunoff/yap_metrics/internal/storage"
 	"github.com/shatrunoff/yap_metrics/internal/utils"
+	"google.golang.org/grpc"
 )
 
-// initServer собирает все зависимости и возвращает http.Server и функцию очистки ресурсов
-func initServer(cfg *config.ServerConfig) (*http.Server, func(), error) {
+// initServer собирает все зависимости и возвращает http.Server, grpc.Server и функцию очистки ресурсов
+func initServer(cfg *config.ServerConfig) (*http.Server, *grpc.Server, storage.Storage, func(), error) {
 	// Конфигурация хранилища
 	storageConfig := &storage.Config{
 		DatabaseDSN:     cfg.DatabaseDSN,
@@ -32,7 +35,7 @@ func initServer(cfg *config.ServerConfig) (*http.Server, func(), error) {
 	// Создаем хранилище (PostgreSQL -> файл -> память)
 	storageInstance, err := storage.NewStorage(storageConfig)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	// Настраиваем файловый сервис при необходимости
@@ -95,6 +98,12 @@ func initServer(cfg *config.ServerConfig) (*http.Server, func(), error) {
 	}
 	server := &http.Server{Addr: cfg.ServerURL, Handler: serverHandler}
 
+	// Создаём gRPC сервер
+	var grpcSrv *grpc.Server
+	if cfg.GRPCAddress != "" {
+		grpcSrv = grpcserver.NewGRPCServer(storageInstance, cfg.TrustedSubnet)
+	}
+
 	// Функция очистки
 	cleanup := func() {
 		if fileService != nil {
@@ -105,7 +114,7 @@ func initServer(cfg *config.ServerConfig) (*http.Server, func(), error) {
 		}
 	}
 
-	return server, cleanup, nil
+	return server, grpcSrv, storageInstance, cleanup, nil
 }
 
 func main() {
@@ -115,10 +124,10 @@ func main() {
 
 	cfg := config.ParseServerConfig()
 
-	log.Printf("Starting server with config: Address=%s, StoreInterval=%v, FileStoragePath=%s, Restore=%v, DatabaseDSN=%v",
-		cfg.ServerURL, cfg.StoreInterval, cfg.FileStoragePath, cfg.Restore, cfg.DatabaseDSN != "")
+	log.Printf("Starting server with config: Address=%s, StoreInterval=%v, FileStoragePath=%s, Restore=%v, DatabaseDSN=%v, GRPCAddress=%s",
+		cfg.ServerURL, cfg.StoreInterval, cfg.FileStoragePath, cfg.Restore, cfg.DatabaseDSN != "", cfg.GRPCAddress)
 
-	server, cleanup, err := initServer(cfg)
+	server, grpcSrv, _, cleanup, err := initServer(cfg)
 	if err != nil {
 		log.Fatalf("Failed to initialize server: %v", err)
 	}
@@ -146,6 +155,20 @@ func main() {
 		}
 	}()
 
+	// Запуск gRPC сервера
+	if grpcSrv != nil && cfg.GRPCAddress != "" {
+		go func() {
+			lis, err := net.Listen("tcp", cfg.GRPCAddress)
+			if err != nil {
+				log.Fatalf("Failed to listen gRPC: %v", err)
+			}
+			log.Printf("gRPC server starting on %s", cfg.GRPCAddress)
+			if err := grpcSrv.Serve(lis); err != nil {
+				log.Fatalf("gRPC server error: %v", err)
+			}
+		}()
+	}
+
 	// Ждем запуска сервера
 	<-ready
 	log.Printf("Server started successfully")
@@ -162,6 +185,10 @@ func main() {
 
 	if err := server.Shutdown(ctx); err != nil {
 		log.Printf("Server shutdown error: %v", err)
+	}
+
+	if grpcSrv != nil {
+		grpcSrv.GracefulStop()
 	}
 
 	log.Printf("Server stopped")
