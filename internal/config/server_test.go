@@ -319,3 +319,44 @@ func TestServerConfigFields(t *testing.T) {
 	// Если код компилируется, тест пройден
 	t.Log("All ServerConfig fields are accessible")
 }
+
+func TestParseServerConfigFromFile(t *testing.T) {
+	// Create temp config file
+	tmpFile, err := os.CreateTemp("", "server_config_*.json")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	configJSON := `{
+		"address": "test:9999",
+		"store_interval": "10s",
+		"store_file": "/tmp/test.json",
+		"restore": false,
+		"database_dsn": "postgres://test",
+		"crypto_key": "/path/to/key",
+		"trusted_subnet": "192.168.0.0/16"
+	}`
+	tmpFile.WriteString(configJSON)
+	tmpFile.Close()
+
+	os.Setenv("CONFIG", tmpFile.Name())
+	defer os.Unsetenv("CONFIG")
+
+	// Clear other env vars
+	os.Unsetenv("ADDRESS")
+	os.Unsetenv("STORE_INTERVAL")
+	os.Unsetenv("FILE_STORAGE_PATH")
+	os.Unsetenv("RESTORE")
+	os.Unsetenv("DATABASE_DSN")
+	os.Unsetenv("CRYPTO_KEY")
+	os.Unsetenv("TRUSTED_SUBNET")
+	os.Unsetenv("GRPC_ADDRESS")
+}
+
+func TestDefaultServerConfigGRPC(t *testing.T) {
+	cfg := DefaultServerConfig()
+	if cfg.GRPCAddress != "" {
+		t.Errorf("Expected empty GRPCAddress, got %s", cfg.GRPCAddress)
+	}
+}
