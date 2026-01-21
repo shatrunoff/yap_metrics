@@ -146,8 +146,8 @@ func TestGRPCSender_Close(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestGetGRPCLocalIP(t *testing.T) {
-	ip := getGRPCLocalIP()
+func TestGetLocalIP(t *testing.T) {
+	ip := getLocalIP()
 	// Should return non-empty string on most systems
 	// May be empty in isolated environments
 	t.Logf("Local IP: %s", ip)

@@ -23,8 +23,16 @@ import (
 	"google.golang.org/grpc"
 )
 
-// initServer собирает все зависимости и возвращает http.Server, grpc.Server и функцию очистки ресурсов
-func initServer(cfg *config.ServerConfig) (*http.Server, *grpc.Server, storage.Storage, func(), error) {
+// ServerComponents содержит все компоненты сервера
+type ServerComponents struct {
+	HTTPServer *http.Server
+	GRPCServer *grpc.Server
+	Storage    storage.Storage
+	Cleanup    func()
+}
+
+// initServer собирает все зависимости и возвращает ServerComponents
+func initServer(cfg *config.ServerConfig) (*ServerComponents, error) {
 	// Конфигурация хранилища
 	storageConfig := &storage.Config{
 		DatabaseDSN:     cfg.DatabaseDSN,
@@ -35,7 +43,7 @@ func initServer(cfg *config.ServerConfig) (*http.Server, *grpc.Server, storage.S
 	// Создаем хранилище (PostgreSQL -> файл -> память)
 	storageInstance, err := storage.NewStorage(storageConfig)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, err
 	}
 
 	// Настраиваем файловый сервис при необходимости
@@ -114,7 +122,12 @@ func initServer(cfg *config.ServerConfig) (*http.Server, *grpc.Server, storage.S
 		}
 	}
 
-	return server, grpcSrv, storageInstance, cleanup, nil
+	return &ServerComponents{
+		HTTPServer: server,
+		GRPCServer: grpcSrv,
+		Storage:    storageInstance,
+		Cleanup:    cleanup,
+	}, nil
 }
 
 func main() {
@@ -127,17 +140,19 @@ func main() {
 	log.Printf("Starting server with config: Address=%s, StoreInterval=%v, FileStoragePath=%s, Restore=%v, DatabaseDSN=%v, GRPCAddress=%s",
 		cfg.ServerURL, cfg.StoreInterval, cfg.FileStoragePath, cfg.Restore, cfg.DatabaseDSN != "", cfg.GRPCAddress)
 
-	server, grpcSrv, _, cleanup, err := initServer(cfg)
+	components, err := initServer(cfg)
 	if err != nil {
 		log.Fatalf("Failed to initialize server: %v", err)
 	}
-	defer cleanup()
+	defer components.Cleanup()
 
-	// Канал для сигнала о готовности сервера
+	// Каналы для обработки ошибок из goroutines
+	httpErrChan := make(chan error, 1)
+	grpcErrChan := make(chan error, 1)
 	ready := make(chan bool, 1)
 
 	go func() {
-		log.Printf("Server starting on %s", server.Addr)
+		log.Printf("Server starting on %s", components.HTTPServer.Addr)
 
 		// Логируем тип используемого хранилища
 		if cfg.DatabaseDSN != "" {
@@ -150,21 +165,22 @@ func main() {
 
 		ready <- true
 
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
+		if err := components.HTTPServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			httpErrChan <- err
 		}
 	}()
 
 	// Запуск gRPC сервера
-	if grpcSrv != nil && cfg.GRPCAddress != "" {
+	if components.GRPCServer != nil && cfg.GRPCAddress != "" {
 		go func() {
 			lis, err := net.Listen("tcp", cfg.GRPCAddress)
 			if err != nil {
-				log.Fatalf("Failed to listen gRPC: %v", err)
+				grpcErrChan <- err
+				return
 			}
 			log.Printf("gRPC server starting on %s", cfg.GRPCAddress)
-			if err := grpcSrv.Serve(lis); err != nil {
-				log.Fatalf("gRPC server error: %v", err)
+			if err := components.GRPCServer.Serve(lis); err != nil {
+				grpcErrChan <- err
 			}
 		}()
 	}
@@ -175,20 +191,26 @@ func main() {
 
 	stopChan := make(chan os.Signal, 1)
 	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
-	<-stopChan
 
-	log.Printf("Shutting down server...")
+	select {
+	case <-stopChan:
+		log.Printf("Shutting down server...")
+	case err := <-httpErrChan:
+		log.Fatalf("HTTP server error: %v", err)
+	case err := <-grpcErrChan:
+		log.Fatalf("gRPC server error: %v", err)
+	}
 
 	// Graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := server.Shutdown(ctx); err != nil {
+	if err := components.HTTPServer.Shutdown(ctx); err != nil {
 		log.Printf("Server shutdown error: %v", err)
 	}
 
-	if grpcSrv != nil {
-		grpcSrv.GracefulStop()
+	if components.GRPCServer != nil {
+		components.GRPCServer.GracefulStop()
 	}
 
 	log.Printf("Server stopped")

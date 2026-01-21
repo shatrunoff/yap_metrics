@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"net"
 	"time"
 
 	"github.com/shatrunoff/yap_metrics/internal/model"
@@ -74,14 +73,4 @@ func (s *GRPCSender) SendBatch(metrics []model.Metrics) error {
 
 	_, err := s.client.UpdateMetrics(ctx, &pb.UpdateMetricsRequest{Metrics: pbMetrics})
 	return err
-}
-
-// getLocalIP возвращает локальный IP-адрес (уже определена в sender.go, но нужна здесь)
-func getGRPCLocalIP() string {
-	conn, err := net.Dial("udp", "8.8.8.8:80")
-	if err != nil {
-		return ""
-	}
-	defer conn.Close()
-	return conn.LocalAddr().(*net.UDPAddr).IP.String()
 }
