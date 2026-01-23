@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/shatrunoff/yap_metrics/internal/config"
+	"github.com/shatrunoff/yap_metrics/internal/model"
 )
 
 // TestAgentService_StartCollector тестирует сбор метрик
@@ -519,5 +520,256 @@ func TestAgentService_CollectorRestart(t *testing.T) {
 	metrics := service.collector.GetMetrics()
 	if len(metrics) == 0 {
 		t.Error("Metrics should be collected after restart")
+	}
+}
+
+// TestNewAgentWithGRPC тестирует создание агента с gRPC
+func TestNewAgentWithGRPC(t *testing.T) {
+	cfg := &config.AgentConfig{
+		PollInterval:   time.Second,
+		ReportInterval: time.Second,
+		GRPCAddress:    "localhost:50051",
+	}
+
+	agent, err := NewAgent(cfg)
+	if err != nil {
+		t.Fatalf("NewAgent failed: %v", err)
+	}
+
+	if !agent.useGRPC {
+		t.Error("Expected useGRPC to be true")
+	}
+	if agent.grpcSender == nil {
+		t.Error("Expected grpcSender to be set")
+	}
+	if agent.sender != nil {
+		t.Error("Expected HTTP sender to be nil when using gRPC")
+	}
+
+	agent.grpcSender.Close()
+}
+
+// TestNewAgentWithHTTP тестирует создание агента с HTTP
+func TestNewAgentWithHTTP(t *testing.T) {
+	cfg := &config.AgentConfig{
+		PollInterval:   time.Second,
+		ReportInterval: time.Second,
+		ServerURL:      "localhost:8080",
+	}
+
+	agent, err := NewAgent(cfg)
+	if err != nil {
+		t.Fatalf("NewAgent failed: %v", err)
+	}
+
+	if agent.useGRPC {
+		t.Error("Expected useGRPC to be false")
+	}
+	if agent.sender == nil {
+		t.Error("Expected HTTP sender to be set")
+	}
+	if agent.grpcSender != nil {
+		t.Error("Expected gRPC sender to be nil when using HTTP")
+	}
+}
+
+// TestNewAgentWithCrypto тестирует создание агента с шифрованием
+func TestNewAgentWithCrypto(t *testing.T) {
+	cfg := &config.AgentConfig{
+		PollInterval:   time.Second,
+		ReportInterval: time.Second,
+		ServerURL:      "localhost:8080",
+		CryptoKey:      "/nonexistent/key.pem",
+	}
+
+	_, err := NewAgent(cfg)
+	// Should fail because key file doesn't exist
+	if err == nil {
+		t.Error("Expected error for nonexistent crypto key")
+	}
+}
+
+// TestCalcJobsBufferSize тестирует расчет размера буфера
+func TestCalcJobsBufferSize(t *testing.T) {
+	tests := []struct {
+		name      string
+		rateLimit int
+		interval  time.Duration
+		minSize   int
+	}{
+		{"default", 0, time.Second, 64},
+		{"with rate limit", 5, time.Second, 64},
+		{"high rate limit", 10, time.Second, 64},
+		{"short interval", 1, 10 * time.Millisecond, 64},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.AgentConfig{
+				RateLimit:      tt.rateLimit,
+				ReportInterval: tt.interval,
+			}
+			size := calcJobsBufferSize(cfg)
+			if size < tt.minSize {
+				t.Errorf("Expected buffer size >= %d, got %d", tt.minSize, size)
+			}
+		})
+	}
+}
+
+// TestAgentServiceStopIdempotent тестирует многократный вызов Stop
+func TestAgentServiceStopIdempotent(t *testing.T) {
+	cfg := &config.AgentConfig{
+		PollInterval:   time.Second,
+		ReportInterval: time.Second,
+		ServerURL:      "localhost:8080",
+	}
+
+	agent, err := NewAgent(cfg)
+	if err != nil {
+		t.Fatalf("NewAgent failed: %v", err)
+	}
+
+	// Multiple stops should not panic
+	agent.Stop()
+	agent.Stop()
+	agent.Stop()
+}
+
+// TestAgentServiceRunAndStop тестирует запуск и остановку с gRPC mock
+func TestAgentServiceRunAndStop(t *testing.T) {
+	// Skip this test as it requires a running server
+	// The functionality is tested in other tests
+	t.Skip("Requires running server or mock")
+}
+
+// TestAgentServiceWithGRPCStop тестирует остановку с gRPC
+func TestAgentServiceWithGRPCStop(t *testing.T) {
+	cfg := &config.AgentConfig{
+		PollInterval:   50 * time.Millisecond,
+		ReportInterval: 100 * time.Millisecond,
+		GRPCAddress:    "localhost:50051",
+		RateLimit:      1,
+	}
+
+	agent, err := NewAgent(cfg)
+	if err != nil {
+		t.Fatalf("NewAgent failed: %v", err)
+	}
+
+	// Stop should close gRPC connection
+	agent.Stop()
+
+	// Verify grpcSender is still accessible (Close was called)
+	if agent.grpcSender == nil {
+		t.Error("grpcSender should not be nil after Stop")
+	}
+}
+
+// TestAgentServiceStartSender тестирует startSender
+func TestAgentServiceStartSender(t *testing.T) {
+	cfg := &config.AgentConfig{
+		PollInterval:   50 * time.Millisecond,
+		ReportInterval: 100 * time.Millisecond,
+		ServerURL:      "localhost:8080",
+		RateLimit:      1,
+	}
+
+	agent, err := NewAgent(cfg)
+	if err != nil {
+		t.Fatalf("NewAgent failed: %v", err)
+	}
+
+	// Collect some metrics first
+	agent.collector.Collect()
+
+	// Start sender in goroutine
+	done := make(chan struct{})
+	go func() {
+		agent.startSender()
+		close(done)
+	}()
+
+	// Let it run briefly
+	time.Sleep(50 * time.Millisecond)
+
+	// Stop
+	close(agent.doneChan)
+
+	select {
+	case <-done:
+		// OK
+	case <-time.After(time.Second):
+		t.Error("startSender did not stop")
+	}
+}
+
+// TestAgentServiceStartWorkers тестирует startWorkers
+func TestAgentServiceStartWorkers(t *testing.T) {
+	cfg := &config.AgentConfig{
+		PollInterval:   50 * time.Millisecond,
+		ReportInterval: 100 * time.Millisecond,
+		GRPCAddress:    "localhost:50051", // Use gRPC to avoid HTTP retries
+		RateLimit:      2,
+	}
+
+	agent, err := NewAgent(cfg)
+	if err != nil {
+		t.Fatalf("NewAgent failed: %v", err)
+	}
+
+	// Start workers
+	agent.startWorkers()
+
+	// Send some jobs
+	v := 1.0
+	for i := 0; i < 5; i++ {
+		agent.jobs <- model.Metrics{ID: "test", MType: model.Gauge, Value: &v}
+	}
+
+	// Close jobs channel to stop workers
+	close(agent.jobs)
+
+	// Wait for workers
+	agent.workersWG.Wait()
+
+	// Clean up gRPC
+	if agent.grpcSender != nil {
+		agent.grpcSender.Close()
+	}
+}
+
+// TestAgentServiceRun тестирует Run с быстрой остановкой
+func TestAgentServiceRun(t *testing.T) {
+	cfg := &config.AgentConfig{
+		PollInterval:   50 * time.Millisecond,
+		ReportInterval: 10 * time.Second, // Long to avoid sending
+		GRPCAddress:    "localhost:50051",
+		RateLimit:      1,
+	}
+
+	agent, err := NewAgent(cfg)
+	if err != nil {
+		t.Fatalf("NewAgent failed: %v", err)
+	}
+
+	// Run in background
+	done := make(chan struct{})
+	go func() {
+		agent.Run()
+		close(done)
+	}()
+
+	// Let it start
+	time.Sleep(100 * time.Millisecond)
+
+	// Stop
+	agent.Stop()
+
+	select {
+	case <-done:
+		// OK
+	case <-time.After(2 * time.Second):
+		t.Error("Run did not stop")
 	}
 }

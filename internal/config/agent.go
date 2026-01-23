@@ -15,6 +15,7 @@ type AgentConfig struct {
 	Key            string
 	RateLimit      int
 	CryptoKey      string
+	GRPCAddress    string
 }
 
 func DefaultAgentConfig() *AgentConfig {
@@ -25,16 +26,18 @@ func DefaultAgentConfig() *AgentConfig {
 		Key:            "",
 		RateLimit:      0,
 		CryptoKey:      "",
+		GRPCAddress:    "",
 	}
 }
 
 type agentFlags struct {
-	pollSec    int
-	repSec     int
-	key        string
-	rateLimit  int
-	cryptoKey  string
-	configFile string
+	pollSec     int
+	repSec      int
+	key         string
+	rateLimit   int
+	cryptoKey   string
+	configFile  string
+	grpcAddress string
 }
 
 func parseAgentFlags(cfg *AgentConfig) *agentFlags {
@@ -45,6 +48,7 @@ func parseAgentFlags(cfg *AgentConfig) *agentFlags {
 	flag.StringVar(&f.key, "k", cfg.Key, "Signing key for HashSHA256 header")
 	flag.StringVar(&f.cryptoKey, "crypto-key", cfg.CryptoKey, "Path to public key file for encryption")
 	flag.IntVar(&f.rateLimit, "l", cfg.RateLimit, "Max concurrent outgoing requests")
+	flag.StringVar(&f.grpcAddress, "g", cfg.GRPCAddress, "gRPC server address host:port")
 	flag.StringVar(&f.configFile, "c", "", "Config file path")
 	flag.StringVar(&f.configFile, "config", "", "Config file path")
 	flag.Parse()
@@ -98,6 +102,9 @@ func applyAgentFlagValues(cfg *AgentConfig, f *agentFlags) {
 	if f.rateLimit > 0 {
 		cfg.RateLimit = f.rateLimit
 	}
+	if f.grpcAddress != "" {
+		cfg.GRPCAddress = f.grpcAddress
+	}
 }
 
 func applyAgentEnvConfig(cfg *AgentConfig) {
@@ -124,6 +131,9 @@ func applyAgentEnvConfig(cfg *AgentConfig) {
 		if rl, err := strconv.Atoi(envRateLimit); err == nil && rl > 0 {
 			cfg.RateLimit = rl
 		}
+	}
+	if envGRPC := os.Getenv("GRPC_ADDRESS"); envGRPC != "" {
+		cfg.GRPCAddress = envGRPC
 	}
 }
 

@@ -29,7 +29,9 @@ fmt:
 	go fmt ./...
 coverage:
 	make build
-	sh coverage.sh
+	go clean -cache -testcache -modcache
+	go test -v -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out | tail -1
 staticlint:
 	./cmd/staticlint/staticlint ./...
 reset:

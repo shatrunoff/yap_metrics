@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -13,15 +14,25 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/shatrunoff/yap_metrics/internal/audit"
 	"github.com/shatrunoff/yap_metrics/internal/config"
+	"github.com/shatrunoff/yap_metrics/internal/grpcserver"
 	"github.com/shatrunoff/yap_metrics/internal/handler"
 	"github.com/shatrunoff/yap_metrics/internal/middleware"
 	"github.com/shatrunoff/yap_metrics/internal/service"
 	"github.com/shatrunoff/yap_metrics/internal/storage"
 	"github.com/shatrunoff/yap_metrics/internal/utils"
+	"google.golang.org/grpc"
 )
 
-// initServer собирает все зависимости и возвращает http.Server и функцию очистки ресурсов
-func initServer(cfg *config.ServerConfig) (*http.Server, func(), error) {
+// ServerComponents содержит все компоненты сервера
+type ServerComponents struct {
+	HTTPServer *http.Server
+	GRPCServer *grpc.Server
+	Storage    storage.Storage
+	Cleanup    func()
+}
+
+// initServer собирает все зависимости и возвращает ServerComponents
+func initServer(cfg *config.ServerConfig) (*ServerComponents, error) {
 	// Конфигурация хранилища
 	storageConfig := &storage.Config{
 		DatabaseDSN:     cfg.DatabaseDSN,
@@ -32,7 +43,7 @@ func initServer(cfg *config.ServerConfig) (*http.Server, func(), error) {
 	// Создаем хранилище (PostgreSQL -> файл -> память)
 	storageInstance, err := storage.NewStorage(storageConfig)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Настраиваем файловый сервис при необходимости
@@ -89,11 +100,17 @@ func initServer(cfg *config.ServerConfig) (*http.Server, func(), error) {
 	// Сборка HTTP-хендлера и сервера
 	var serverHandler http.Handler
 	if cfg.CryptoKey != "" {
-		serverHandler = handler.NewHandlerWithCrypto(storageInstance, fileService, syncSave, cfg.Key, auditNotifier, cfg.CryptoKey)
+		serverHandler = handler.NewHandlerWithCrypto(storageInstance, fileService, syncSave, cfg.Key, auditNotifier, cfg.CryptoKey, cfg.TrustedSubnet)
 	} else {
-		serverHandler = handler.NewHandler(storageInstance, fileService, syncSave, cfg.Key, auditNotifier)
+		serverHandler = handler.NewHandler(storageInstance, fileService, syncSave, cfg.Key, auditNotifier, cfg.TrustedSubnet)
 	}
 	server := &http.Server{Addr: cfg.ServerURL, Handler: serverHandler}
+
+	// Создаём gRPC сервер
+	var grpcSrv *grpc.Server
+	if cfg.GRPCAddress != "" {
+		grpcSrv = grpcserver.NewGRPCServer(storageInstance, cfg.TrustedSubnet)
+	}
 
 	// Функция очистки
 	cleanup := func() {
@@ -105,7 +122,12 @@ func initServer(cfg *config.ServerConfig) (*http.Server, func(), error) {
 		}
 	}
 
-	return server, cleanup, nil
+	return &ServerComponents{
+		HTTPServer: server,
+		GRPCServer: grpcSrv,
+		Storage:    storageInstance,
+		Cleanup:    cleanup,
+	}, nil
 }
 
 func main() {
@@ -115,20 +137,22 @@ func main() {
 
 	cfg := config.ParseServerConfig()
 
-	log.Printf("Starting server with config: Address=%s, StoreInterval=%v, FileStoragePath=%s, Restore=%v, DatabaseDSN=%v",
-		cfg.ServerURL, cfg.StoreInterval, cfg.FileStoragePath, cfg.Restore, cfg.DatabaseDSN != "")
+	log.Printf("Starting server with config: Address=%s, StoreInterval=%v, FileStoragePath=%s, Restore=%v, DatabaseDSN=%v, GRPCAddress=%s",
+		cfg.ServerURL, cfg.StoreInterval, cfg.FileStoragePath, cfg.Restore, cfg.DatabaseDSN != "", cfg.GRPCAddress)
 
-	server, cleanup, err := initServer(cfg)
+	components, err := initServer(cfg)
 	if err != nil {
 		log.Fatalf("Failed to initialize server: %v", err)
 	}
-	defer cleanup()
+	defer components.Cleanup()
 
-	// Канал для сигнала о готовности сервера
+	// Каналы для обработки ошибок из goroutines
+	httpErrChan := make(chan error, 1)
+	grpcErrChan := make(chan error, 1)
 	ready := make(chan bool, 1)
 
 	go func() {
-		log.Printf("Server starting on %s", server.Addr)
+		log.Printf("Server starting on %s", components.HTTPServer.Addr)
 
 		// Логируем тип используемого хранилища
 		if cfg.DatabaseDSN != "" {
@@ -141,10 +165,25 @@ func main() {
 
 		ready <- true
 
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
+		if err := components.HTTPServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			httpErrChan <- err
 		}
 	}()
+
+	// Запуск gRPC сервера
+	if components.GRPCServer != nil && cfg.GRPCAddress != "" {
+		go func() {
+			lis, err := net.Listen("tcp", cfg.GRPCAddress)
+			if err != nil {
+				grpcErrChan <- err
+				return
+			}
+			log.Printf("gRPC server starting on %s", cfg.GRPCAddress)
+			if err := components.GRPCServer.Serve(lis); err != nil {
+				grpcErrChan <- err
+			}
+		}()
+	}
 
 	// Ждем запуска сервера
 	<-ready
@@ -152,16 +191,26 @@ func main() {
 
 	stopChan := make(chan os.Signal, 1)
 	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
-	<-stopChan
 
-	log.Printf("Shutting down server...")
+	select {
+	case <-stopChan:
+		log.Printf("Shutting down server...")
+	case err := <-httpErrChan:
+		log.Fatalf("HTTP server error: %v", err)
+	case err := <-grpcErrChan:
+		log.Fatalf("gRPC server error: %v", err)
+	}
 
 	// Graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := server.Shutdown(ctx); err != nil {
+	if err := components.HTTPServer.Shutdown(ctx); err != nil {
 		log.Printf("Server shutdown error: %v", err)
+	}
+
+	if components.GRPCServer != nil {
+		components.GRPCServer.GracefulStop()
 	}
 
 	log.Printf("Server stopped")

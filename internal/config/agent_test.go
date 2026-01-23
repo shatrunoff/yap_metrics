@@ -92,3 +92,90 @@ func TestParseAgentConfigWithEnvVars(t *testing.T) {
 func resetFlags() {
 	// This is a simple approach - in real scenarios you might need more sophisticated flag reset
 }
+
+func TestApplyAgentFileConfig(t *testing.T) {
+	// Create temp config file
+	tmpFile, err := os.CreateTemp("", "agent_config_*.json")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	configJSON := `{
+		"address": "test:9999",
+		"report_interval": "5s",
+		"poll_interval": "2s",
+		"crypto_key": "/path/to/key"
+	}`
+	tmpFile.WriteString(configJSON)
+	tmpFile.Close()
+
+	cfg := DefaultAgentConfig()
+	applyAgentFileConfig(cfg, tmpFile.Name())
+
+	if cfg.ServerURL != "test:9999" {
+		t.Errorf("Expected ServerURL test:9999, got %s", cfg.ServerURL)
+	}
+	if cfg.ReportInterval != 5*time.Second {
+		t.Errorf("Expected ReportInterval 5s, got %v", cfg.ReportInterval)
+	}
+	if cfg.PollInterval != 2*time.Second {
+		t.Errorf("Expected PollInterval 2s, got %v", cfg.PollInterval)
+	}
+	if cfg.CryptoKey != "/path/to/key" {
+		t.Errorf("Expected CryptoKey /path/to/key, got %s", cfg.CryptoKey)
+	}
+}
+
+func TestApplyAgentFileConfigEmpty(t *testing.T) {
+	cfg := DefaultAgentConfig()
+	original := *cfg
+
+	// Empty config file path
+	applyAgentFileConfig(cfg, "")
+
+	// Should not change anything
+	if cfg.ServerURL != original.ServerURL {
+		t.Error("Config should not change with empty file path")
+	}
+}
+
+func TestApplyAgentFlagValuesAll(t *testing.T) {
+	cfg := DefaultAgentConfig()
+	f := &agentFlags{
+		pollSec:     5,
+		repSec:      15,
+		key:         "secret",
+		cryptoKey:   "/key.pem",
+		rateLimit:   10,
+		grpcAddress: "localhost:50051",
+	}
+
+	applyAgentFlagValues(cfg, f)
+
+	if cfg.PollInterval != 5*time.Second {
+		t.Errorf("Expected PollInterval 5s, got %v", cfg.PollInterval)
+	}
+	if cfg.ReportInterval != 15*time.Second {
+		t.Errorf("Expected ReportInterval 15s, got %v", cfg.ReportInterval)
+	}
+	if cfg.Key != "secret" {
+		t.Errorf("Expected Key secret, got %s", cfg.Key)
+	}
+	if cfg.CryptoKey != "/key.pem" {
+		t.Errorf("Expected CryptoKey /key.pem, got %s", cfg.CryptoKey)
+	}
+	if cfg.RateLimit != 10 {
+		t.Errorf("Expected RateLimit 10, got %d", cfg.RateLimit)
+	}
+	if cfg.GRPCAddress != "localhost:50051" {
+		t.Errorf("Expected GRPCAddress localhost:50051, got %s", cfg.GRPCAddress)
+	}
+}
+
+func TestDefaultAgentConfigGRPC(t *testing.T) {
+	cfg := DefaultAgentConfig()
+	if cfg.GRPCAddress != "" {
+		t.Errorf("Expected empty GRPCAddress, got %s", cfg.GRPCAddress)
+	}
+}

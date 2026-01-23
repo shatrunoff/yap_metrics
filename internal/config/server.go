@@ -17,6 +17,8 @@ type ServerConfig struct {
 	AuditFile       string
 	AuditURL        string
 	CryptoKey       string
+	TrustedSubnet   string
+	GRPCAddress     string
 }
 
 func DefaultServerConfig() *ServerConfig {
@@ -30,6 +32,8 @@ func DefaultServerConfig() *ServerConfig {
 		AuditFile:       "",
 		AuditURL:        "",
 		CryptoKey:       "",
+		TrustedSubnet:   "",
+		GRPCAddress:     "",
 	}
 }
 
@@ -46,6 +50,8 @@ func ParseServerConfig() *ServerConfig {
 	flag.StringVar(&cfg.DatabaseDSN, "d", cfg.DatabaseDSN, "Database DSN")
 	flag.StringVar(&cfg.Key, "k", cfg.Key, "Signing key for HashSHA256 header")
 	flag.StringVar(&cfg.CryptoKey, "crypto-key", cfg.CryptoKey, "Path to private key file for decryption")
+	flag.StringVar(&cfg.TrustedSubnet, "t", cfg.TrustedSubnet, "Trusted subnet in CIDR notation")
+	flag.StringVar(&cfg.GRPCAddress, "g", cfg.GRPCAddress, "gRPC server address host:port")
 	flag.StringVar(&cfg.AuditFile, "audit-file", cfg.AuditFile, "Audit log file path")
 	flag.StringVar(&cfg.AuditURL, "audit-url", cfg.AuditURL, "Audit log URL")
 	flag.StringVar(&configFile, "c", "", "Config file path")
@@ -78,6 +84,9 @@ func ParseServerConfig() *ServerConfig {
 		}
 		if fileConfig.CryptoKey != "" {
 			cfg.CryptoKey = fileConfig.CryptoKey
+		}
+		if fileConfig.TrustedSubnet != "" {
+			cfg.TrustedSubnet = fileConfig.TrustedSubnet
 		}
 	}
 
@@ -117,6 +126,12 @@ func ParseServerConfig() *ServerConfig {
 	}
 	if envAuditURL := os.Getenv("AUDIT_URL"); envAuditURL != "" {
 		cfg.AuditURL = envAuditURL
+	}
+	if envTrustedSubnet := os.Getenv("TRUSTED_SUBNET"); envTrustedSubnet != "" {
+		cfg.TrustedSubnet = envTrustedSubnet
+	}
+	if envGRPC := os.Getenv("GRPC_ADDRESS"); envGRPC != "" {
+		cfg.GRPCAddress = envGRPC
 	}
 
 	return cfg

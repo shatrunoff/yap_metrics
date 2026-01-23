@@ -334,3 +334,264 @@ func TestMemStorage_Close(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+func TestMemStorage_SaveAndLoadFile(t *testing.T) {
+	ms := NewMemStorage()
+	ctx := context.Background()
+
+	// Add some metrics
+	ms.UpdateGauge(ctx, "g1", 1.1)
+	ms.UpdateGauge(ctx, "g2", 2.2)
+	ms.UpdateCounter(ctx, "c1", 100)
+	ms.UpdateCounter(ctx, "c2", 200)
+
+	// Save to temp file
+	tmpFile := filepath.Join(t.TempDir(), "metrics.json")
+	err := ms.SaveToFile(tmpFile)
+	if err != nil {
+		t.Fatalf("SaveToFile failed: %v", err)
+	}
+
+	// Create new storage and load
+	ms2 := NewMemStorage()
+	err = ms2.LoadFromFile(tmpFile)
+	if err != nil {
+		t.Fatalf("LoadFromFile failed: %v", err)
+	}
+
+	// Verify gauges
+	m, _ := ms2.GetMetric(ctx, model.Gauge, "g1")
+	if m.Value == nil || *m.Value != 1.1 {
+		t.Errorf("Expected g1=1.1, got %v", m.Value)
+	}
+
+	// Verify counters
+	m, _ = ms2.GetMetric(ctx, model.Counter, "c1")
+	if m.Delta == nil || *m.Delta != 100 {
+		t.Errorf("Expected c1=100, got %v", m.Delta)
+	}
+}
+
+func TestMemStorage_SaveToFileError(t *testing.T) {
+	ms := NewMemStorage()
+
+	// Try to save to invalid path
+	err := ms.SaveToFile("/nonexistent/dir/file.json")
+	if err == nil {
+		t.Error("Expected error for invalid path")
+	}
+}
+
+func TestMemStorage_LoadFromFileNotExist(t *testing.T) {
+	ms := NewMemStorage()
+
+	// Load from non-existent file should not error (creates empty storage)
+	err := ms.LoadFromFile("/nonexistent/file.json")
+	if err != nil {
+		t.Errorf("LoadFromFile should not error for non-existent file: %v", err)
+	}
+}
+
+func TestMemStorage_LoadFromFileInvalidJSON(t *testing.T) {
+	ms := NewMemStorage()
+
+	// Create temp file with invalid JSON
+	tmpFile := filepath.Join(t.TempDir(), "invalid.json")
+	os.WriteFile(tmpFile, []byte("invalid json"), 0644)
+
+	err := ms.LoadFromFile(tmpFile)
+	if err == nil {
+		t.Error("Expected error for invalid JSON")
+	}
+}
+
+func TestMemStorage_Ping_Basic(t *testing.T) {
+	ms := NewMemStorage()
+	err := ms.Ping(context.Background())
+	if err != nil {
+		t.Errorf("Ping should not error: %v", err)
+	}
+}
+
+func TestMemStorage_Close_Basic(t *testing.T) {
+	ms := NewMemStorage()
+	err := ms.Close()
+	if err != nil {
+		t.Errorf("Close should not error: %v", err)
+	}
+}
+
+func TestMemStorage_GetMetricUnknownType(t *testing.T) {
+	ms := NewMemStorage()
+	ctx := context.Background()
+
+	_, err := ms.GetMetric(ctx, "unknown", "test")
+	if err == nil {
+		t.Error("Expected error for unknown metric type")
+	}
+}
+
+func TestMemStorage_GetAllEmpty(t *testing.T) {
+	ms := NewMemStorage()
+	ctx := context.Background()
+
+	all, err := ms.GetAll(ctx)
+	if err != nil {
+		t.Errorf("GetAll failed: %v", err)
+	}
+	if len(all) != 0 {
+		t.Errorf("Expected empty map, got %d items", len(all))
+	}
+}
+
+func TestMemStorage_UpdateMetricsBatchMixed(t *testing.T) {
+	ms := NewMemStorage()
+	ctx := context.Background()
+
+	v1, v2 := 10.5, 20.5
+	d1, d2 := int64(100), int64(200)
+
+	metrics := []model.Metrics{
+		{ID: "g1", MType: model.Gauge, Value: &v1},
+		{ID: "g2", MType: model.Gauge, Value: &v2},
+		{ID: "c1", MType: model.Counter, Delta: &d1},
+		{ID: "c2", MType: model.Counter, Delta: &d2},
+		{ID: "unknown", MType: "unknown"},
+	}
+
+	err := ms.UpdateMetricsBatch(ctx, metrics)
+	if err != nil {
+		t.Errorf("UpdateMetricsBatch failed: %v", err)
+	}
+
+	all, _ := ms.GetAll(ctx)
+	if len(all) != 4 {
+		t.Errorf("Expected 4 metrics, got %d", len(all))
+	}
+}
+
+func TestMemStorage_UpdateMetricsBatchEmpty(t *testing.T) {
+	ms := NewMemStorage()
+	ctx := context.Background()
+
+	err := ms.UpdateMetricsBatch(ctx, []model.Metrics{})
+	if err != nil {
+		t.Errorf("UpdateMetricsBatch with empty slice failed: %v", err)
+	}
+}
+
+func TestMemStorage_UpdateMetricsBatchNilValues(t *testing.T) {
+	ms := NewMemStorage()
+	ctx := context.Background()
+
+	metrics := []model.Metrics{
+		{ID: "nil_gauge", MType: model.Gauge, Value: nil},
+		{ID: "nil_counter", MType: model.Counter, Delta: nil},
+	}
+
+	err := ms.UpdateMetricsBatch(ctx, metrics)
+	if err != nil {
+		t.Errorf("UpdateMetricsBatch failed: %v", err)
+	}
+}
+
+func TestMemStorage_UpdateMetricsBatchEmptyID(t *testing.T) {
+	ms := NewMemStorage()
+	ctx := context.Background()
+
+	v := 1.0
+	metrics := []model.Metrics{
+		{ID: "", MType: model.Gauge, Value: &v},
+	}
+
+	err := ms.UpdateMetricsBatch(ctx, metrics)
+	if err != nil {
+		t.Errorf("UpdateMetricsBatch failed: %v", err)
+	}
+
+	all, _ := ms.GetAll(ctx)
+	if len(all) != 0 {
+		t.Errorf("Expected 0 metrics (empty ID skipped), got %d", len(all))
+	}
+}
+
+func TestMemStorage_ConcurrentAccess(t *testing.T) {
+	ms := NewMemStorage()
+	ctx := context.Background()
+
+	done := make(chan bool)
+
+	// Writer goroutine
+	go func() {
+		for i := 0; i < 100; i++ {
+			ms.UpdateGauge(ctx, "concurrent", float64(i))
+			ms.UpdateCounter(ctx, "concurrent_counter", 1)
+		}
+		done <- true
+	}()
+
+	// Reader goroutine
+	go func() {
+		for i := 0; i < 100; i++ {
+			ms.GetMetric(ctx, model.Gauge, "concurrent")
+			ms.GetAll(ctx)
+		}
+		done <- true
+	}()
+
+	<-done
+	<-done
+}
+
+func TestMemStorage_SaveToFile_MarshalError(t *testing.T) {
+	// This test verifies SaveToFile handles the path correctly
+	ms := NewMemStorage()
+	ctx := context.Background()
+	ms.UpdateGauge(ctx, "test", 1.0)
+
+	// Save to valid path
+	tmpFile := filepath.Join(t.TempDir(), "test.json")
+	err := ms.SaveToFile(tmpFile)
+	if err != nil {
+		t.Errorf("SaveToFile failed: %v", err)
+	}
+
+	// Verify file exists
+	if _, err := os.Stat(tmpFile); os.IsNotExist(err) {
+		t.Error("File should exist after SaveToFile")
+	}
+}
+
+func TestMemStorage_LoadFromFile_ReadError(t *testing.T) {
+	ms := NewMemStorage()
+
+	// Create a directory instead of file to cause read error
+	tmpDir := t.TempDir()
+	dirPath := filepath.Join(tmpDir, "testdir")
+	os.Mkdir(dirPath, 0755)
+
+	err := ms.LoadFromFile(dirPath)
+	if err == nil {
+		t.Error("Expected error when loading directory as file")
+	}
+}
+
+func TestMemStorage_GetMetricGaugeNotFound(t *testing.T) {
+	ms := NewMemStorage()
+	ctx := context.Background()
+
+	_, err := ms.GetMetric(ctx, model.Gauge, "nonexistent")
+	if err == nil {
+		t.Error("Expected error for nonexistent gauge")
+	}
+}
+
+func TestMemStorage_GetMetricCounterNotFound(t *testing.T) {
+	ms := NewMemStorage()
+	ctx := context.Background()
+
+	_, err := ms.GetMetric(ctx, model.Counter, "nonexistent")
+	if err == nil {
+		t.Error("Expected error for nonexistent counter")
+	}
+}

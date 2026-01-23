@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -18,6 +19,17 @@ import (
 	"github.com/shatrunoff/yap_metrics/internal/model"
 	"github.com/shatrunoff/yap_metrics/internal/utils"
 )
+
+// getLocalIP возвращает локальный IP-адрес хоста
+func getLocalIP() string {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP.String()
+}
 
 type Sender struct {
 	ServerURL string
@@ -89,6 +101,11 @@ func (s *Sender) sendRequest(url string, jsonData []byte) error {
 	}
 
 	req.Header.Set("Accept-Encoding", "gzip")
+
+	// Добавляем X-Real-IP с IP-адресом хоста агента
+	if ip := getLocalIP(); ip != "" {
+		req.Header.Set("X-Real-IP", ip)
+	}
 
 	if s.Key != "" {
 		sig := utils.ComputeHMACSHA256(jsonData, s.Key)
@@ -224,6 +241,9 @@ func (s *Sender) Send(metrics map[string]model.Metrics) error {
 		}
 		request.Header.Set("Content-Type", "text/plain")
 		request.Header.Set("Accept-Encoding", "gzip")
+		if ip := getLocalIP(); ip != "" {
+			request.Header.Set("X-Real-IP", ip)
+		}
 
 		// отправляем
 		response, err := s.Client.Do(request)
